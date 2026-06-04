@@ -132,6 +132,31 @@
   .bd-row input{width:22px; height:22px; flex-shrink:0;}
   .bd-row .bd-name{flex:1; font-size:.92rem;}
   #modal-ok:disabled{opacity:.45;}
+  /* ----- reviews ----- */
+  .stars{display:inline-flex; gap:2px; font-size:1.5rem; line-height:1;}
+  .stars button{min-height:auto; padding:0 2px; border:none; background:none; font-size:1.5rem; line-height:1; color:var(--border-2); cursor:pointer;}
+  .stars button.on{color:var(--accent);}
+  .stars.ro{font-size:1rem; pointer-events:none;}
+  .stars.ro span{color:var(--border-2);} .stars.ro span.on{color:var(--accent);}
+  .review-box{margin-top:10px; padding:11px 13px; background:var(--accent-bg); border:0.5px solid var(--accent-bd); border-radius:var(--radius-sm);}
+  .review-box .stars{font-size:1.1rem;}
+  .review-quote{font-size:.86rem; color:var(--text-2); margin:6px 0 0; font-style:italic;}
+  .review-give{margin-top:10px; padding:11px 13px; background:var(--surface-2); border-radius:var(--radius-sm);}
+  .review-give textarea{width:100%; min-height:64px; padding:10px 12px; font-family:inherit; font-size:.95rem; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); resize:vertical; margin:8px 0;}
+  .review-give textarea:focus{outline:none; box-shadow:0 0 0 3px var(--info-bg); border-color:var(--info-bd);}
+  .rating-summary{display:flex; align-items:center; gap:10px; margin:0 0 12px;}
+  .rating-big{font-size:2rem; font-weight:700; color:var(--text); line-height:1;}
+  /* ----- analytics ----- */
+  .rank-row{display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:0.5px solid var(--border);}
+  .rank-row:last-child{border-bottom:none;}
+  .rank-num{flex-shrink:0; width:26px; height:26px; border-radius:50%; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:center; font-size:.82rem; font-weight:600;}
+  .rank-row:nth-child(1) .rank-num{background:var(--accent); color:#fff;}
+  .rank-name{flex:1; font-weight:500;}
+  .rank-bar-wrap{flex:1; height:8px; background:var(--surface-2); border-radius:999px; overflow:hidden; margin:0 4px;}
+  .rank-bar{height:100%; background:var(--accent); border-radius:999px;}
+  .rank-qty{flex-shrink:0; font-weight:600; color:var(--accent-fg); min-width:46px; text-align:right;}
+  .fb-item{padding:11px 13px; border:0.5px solid var(--border); border-radius:var(--radius-sm); margin-bottom:8px; background:var(--surface);}
+  .fb-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
 </style>
 </head>
 <body>
@@ -250,6 +275,21 @@ function sumQty(it){ return Number(it.qty||1); }
 function deliveryLineHtml(fee){
   fee=Number(fee||0);
   return fee>0 ? `<div class="oi"><span>&#128666; Delivery fee</span><span class="price">${peso(fee)}</span></div>` : '';
+}
+// Read-only stars for displaying a saved rating (1..5)
+function starsRO(rating){
+  const r=Number(rating)||0;
+  let s='<span class="stars ro">';
+  for(let i=1;i<=5;i++) s+=`<span class="${i<=r?'on':''}">\u2605</span>`;
+  return s+'</span>';
+}
+// Wire up an interactive star picker inside a container. Returns nothing;
+// reads/writes the current value via the container's dataset.rating.
+function bindStarPicker(container){
+  const btns=[...container.querySelectorAll('button')];
+  const paint=v=>btns.forEach((b,i)=>b.classList.toggle('on', i<v));
+  btns.forEach((b,i)=>b.onclick=()=>{ container.dataset.rating=String(i+1); paint(i+1); });
+  paint(Number(container.dataset.rating)||0);
 }
 // In-app modal (replaces window.confirm/prompt, which are blocked in installed PWAs)
 function uiModal({title, body, withInput=false, inputPlaceholder='', okText='Confirm', cancelText='Cancel'}){
@@ -484,17 +524,85 @@ async function viewMyOrders(){
       payblock=`<p class="muted" style="margin:10px 0 0;">Payment after delivery</p>`;
     }
     const canCancel = o.status==='new' && !o.delivered;
+    // Review: optional, available once delivered (with or without payment proof)
+    let reviewblock='';
+    if(o.delivered){
+      if(o.review_rating){
+        reviewblock=`<div class="review-box">
+          <div class="row" style="justify-content:space-between;">
+            <span style="font-weight:500; font-size:.86rem;">Your review</span>
+            ${starsRO(o.review_rating)}
+          </div>
+          ${o.review_text?`<p class="review-quote">\u201C${esc(o.review_text)}\u201D</p>`:''}
+          <button class="reset edit-review" data-id="${o.id}" style="margin-top:8px;">Edit review</button>
+        </div>`;
+      } else {
+        reviewblock=`<div class="review-give" id="rg-${o.id}">
+          <p style="font-size:.86rem; color:var(--text-2); margin:0;">How was it? <span class="muted">(optional)</span></p>
+          <div class="stars" data-rating="0" id="rs-${o.id}">
+            <button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button>
+          </div>
+          <textarea id="rt-${o.id}" placeholder="Add a comment about the food (optional)"></textarea>
+          <button class="small-btn primary save-review" data-id="${o.id}">Submit review</button>
+        </div>`;
+      }
+    }
     return `<div class="order">
       <div class="ohead"><span style="font-weight:500;">${esc(orgName[o.organizer_id]||'Organizer')}</span>${statusPill}</div>
       <p class="muted" style="margin:2px 0 0;">${fmtDateTime(o.created_at)}</p>
       <div class="oitems">${itemLines}</div>
       <div class="ohead"><span class="otot">Total: <b>${peso(o.total)}</b></span></div>
       ${payblock}
+      ${reviewblock}
       ${canCancel?`<div class="order-actions"><button class="small-btn danger cancel" data-id="${o.id}">Cancel order</button></div>`:''}
     </div>`;
   }).join('');
   v.querySelectorAll('.proof-file').forEach(inp=>inp.onchange=e=>uploadProof(e.target.dataset.id, e.target.files[0]));
   v.querySelectorAll('.cancel').forEach(b=>b.onclick=()=>cancelOrder(b.dataset.id));
+  v.querySelectorAll('.stars[id^="rs-"]').forEach(c=>bindStarPicker(c));
+  v.querySelectorAll('.save-review').forEach(b=>b.onclick=()=>saveReview(b.dataset.id));
+  v.querySelectorAll('.edit-review').forEach(b=>b.onclick=()=>editReview(b.dataset.id));
+}
+
+// Customer submits / updates a review for a delivered order.
+async function saveReview(orderId){
+  const ratingEl=$('rs-'+orderId);
+  const rating=Number(ratingEl&&ratingEl.dataset.rating)||0;
+  const text=($('rt-'+orderId)&&$('rt-'+orderId).value.trim())||'';
+  if(!rating && !text){ alert('Add a star rating or a comment first.'); return; }
+  if(!rating){ alert('Please tap a star rating (1\u20135) before submitting.'); return; }
+  const {error}=await sb.from('orders').update({
+    review_rating:rating, review_text:text||null, reviewed_at:new Date().toISOString()
+  }).eq('id',orderId);
+  if(error){ alert(error.message); return; }
+  viewMyOrders();
+}
+// Re-open the review editor for an already-reviewed order.
+async function editReview(orderId){
+  const {data:o}=await sb.from('orders').select('review_rating,review_text').eq('id',orderId).single();
+  const r=(o&&o.review_rating)||0, t=(o&&o.review_text)||'';
+  const bd=$('modal-backdrop');
+  $('modal-title').textContent='Edit your review';
+  $('modal-body').innerHTML=`
+    <div class="stars" data-rating="${r}" id="edit-stars">
+      <button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button>
+    </div>
+    <textarea id="edit-text" style="width:100%; min-height:70px; margin-top:10px; padding:10px 12px; font-family:inherit; font-size:.95rem; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);" placeholder="Comment (optional)">${esc(t)}</textarea>`;
+  $('modal-input-wrap').classList.add('hide');
+  $('modal-ok').textContent='Save'; $('modal-cancel').textContent='Cancel';
+  bd.classList.remove('hide');
+  bindStarPicker($('edit-stars'));
+  const close=()=>{ bd.classList.add('hide'); $('modal-ok').onclick=null; $('modal-cancel').onclick=null; bd.onclick=null; };
+  $('modal-cancel').onclick=close;
+  bd.onclick=e=>{ if(e.target===bd) close(); };
+  $('modal-ok').onclick=async()=>{
+    const rating=Number($('edit-stars').dataset.rating)||0;
+    const text=$('edit-text').value.trim();
+    if(!rating){ alert('Please tap a star rating (1\u20135).'); return; }
+    close();
+    await sb.from('orders').update({review_rating:rating, review_text:text||null, reviewed_at:new Date().toISOString()}).eq('id',orderId);
+    viewMyOrders();
+  };
 }
 
 async function cancelOrder(orderId){
@@ -586,7 +694,8 @@ async function loadOrgOrders(menu){
   const history=orders.filter(o=>o.delivered);
 
   // ----- sub-tab bar -----
-  const subTabs=[['prepare','To prepare',active.length],['incoming','Incoming',active.length],['history','History',history.length]];
+  const reviewCount=orders.filter(o=>o.review_rating).length;
+  const subTabs=[['prepare','To prepare',active.length],['incoming','Incoming',active.length],['history','History',history.length],['analytics','Analytics',reviewCount]];
   if(!subTabs.some(t=>t[0]===orgSubTab)) orgSubTab='prepare';
   const subbar=`<div class="subtabs">`+subTabs.map(([k,l,n])=>
     `<button class="${k===orgSubTab?'active':''}" data-sub="${k}">${l}<br><span class="subtab-count">${n}</span></button>`).join('')+`</div>`;
@@ -656,7 +765,7 @@ async function loadOrgOrders(menu){
       : '';
     body=filterBar(true)+`<h3>Incoming orders</h3>`+countNote+batchBtn+cards;
   }
-  else { // history
+  else if(orgSubTab==='history'){ // history
     if(!history.length){
       body=`<h3>&#128221; Order history</h3><p class="muted">No delivered orders yet.</p>`;
     } else {
@@ -666,17 +775,24 @@ async function loadOrgOrders(menu){
         histDateKeys.map(k=>`<button class="chip ${orgFilter.date===k?'active':''}" data-f="date" data-v="${k}">${dayLabel(k)}</button>`).join('');
       const histFilter=`<div class="filters"><div><p class="filter-lbl">Filter by date</p><div class="filter-grp">${histChips}</div></div></div>`;
       const histRevenue=hShown.reduce((s,o)=>s+Number(o.total),0);
+      const rated=hShown.filter(o=>o.review_rating);
+      const avgRating = rated.length ? (rated.reduce((s,o)=>s+Number(o.review_rating),0)/rated.length) : 0;
+      const ratingSummary = rated.length
+        ? `<div class="card"><div class="rating-summary"><span class="rating-big">${avgRating.toFixed(1)}</span><div>${starsRO(Math.round(avgRating))}<p class="muted" style="margin:2px 0 0;">${rated.length} review${rated.length!==1?'s':''} \u00B7 ${orgFilter.date==='all'?'all dates':dayLabel(orgFilter.date)}</p></div></div></div>`
+        : '';
       const histSummary=`<div class="stats">
         <div class="stat"><p class="lbl">Delivered</p><p class="val">${hShown.length}</p></div>
-        <div class="stat"><p class="lbl">Customers</p><p class="val">${hShown.length}</p></div>
+        <div class="stat"><p class="lbl">Reviews</p><p class="val">${rated.length}</p></div>
         <div class="stat"><p class="lbl">Revenue</p><p class="val">${peso(histRevenue)}</p></div>
-      </div>`;
+      </div>`+ratingSummary;
       const histCards=hShown.length? hShown.map(o=>{
         const payPill = o.paid
           ? '<span class="pill p-delivered">Paid \u2713</span>'
           : (o.proof_url?'<span class="pill p-conf">Proof received</span>':'<span class="pill p-pending">Unpaid</span>');
         const itemLines=itemLinesHtml(byOrder[o.id])+deliveryLineHtml(o.delivery_fee);
-        let actions;
+        const reviewHtml = o.review_rating
+          ? `<div class="review-box"><div class="row" style="justify-content:space-between;"><span style="font-weight:500; font-size:.82rem;">Customer review</span>${starsRO(o.review_rating)}</div>${o.review_text?`<p class="review-quote">\u201C${esc(o.review_text)}\u201D</p>`:''}</div>`
+          : '';
         if(!o.paid){
           actions = o.proof_url
             ? `<button class="small-btn undo" data-id="${o.id}">Undo delivered</button>
@@ -696,11 +812,67 @@ async function loadOrgOrders(menu){
           <p class="muted" style="margin:2px 0 0;">${fmtDateTime(o.created_at)}</p>
           <div class="oitems">${itemLines}</div>
           <div class="ohead"><span class="otot">Total: <b>${peso(o.total)}</b></span></div>
+          ${reviewHtml}
           <div class="order-actions">${actions}</div>
         </div>`;
       }).join('') : '<p class="muted">No delivered orders on this date.</p>';
       body=`<h3>&#128221; Order history</h3>`+histFilter+histSummary+histCards;
     }
+  }
+  else if(orgSubTab==='analytics'){
+    // Analytics over all DELIVERED orders for this organizer (full history).
+    const deliveredIds=new Set(history.map(o=>o.id));
+    // Top ordered items by total quantity
+    const qtyAgg={};
+    (allItems||[]).forEach(it=>{ if(deliveredIds.has(it.order_id)) qtyAgg[it.name]=(qtyAgg[it.name]||0)+Number(it.qty||1); });
+    const ranked=Object.entries(qtyAgg).sort((a,b)=>b[1]-a[1]);
+    const maxQty=ranked.length?ranked[0][1]:0;
+    const totalUnits=ranked.reduce((s,[,n])=>s+n,0);
+
+    // Reviews across all delivered orders
+    const reviewed=history.filter(o=>o.review_rating).sort((a,b)=>new Date(b.reviewed_at||b.created_at)-new Date(a.reviewed_at||a.created_at));
+    const avgAll = reviewed.length ? (reviewed.reduce((s,o)=>s+Number(o.review_rating),0)/reviewed.length) : 0;
+    // rating distribution 5..1
+    const dist=[0,0,0,0,0];
+    reviewed.forEach(o=>{ dist[5-o.review_rating]++; });
+
+    const topBody = ranked.length
+      ? ranked.slice(0,15).map(([name,qty],i)=>`<div class="rank-row">
+          <span class="rank-num">${i+1}</span>
+          <span class="rank-name">${esc(name)}</span>
+          <span class="rank-bar-wrap"><span class="rank-bar" style="width:${maxQty?Math.round(qty/maxQty*100):0}%;"></span></span>
+          <span class="rank-qty">${qty}\u00D7</span>
+        </div>`).join('')
+      : '<p class="muted" style="margin:4px 0 0;">No delivered orders yet \u2014 analytics will appear once you deliver orders.</p>';
+
+    const distBody = reviewed.length
+      ? [5,4,3,2,1].map(star=>{
+          const n=dist[5-star], pct=reviewed.length?Math.round(n/reviewed.length*100):0;
+          return `<div class="rank-row" style="padding:7px 0;">
+            <span style="flex-shrink:0; width:40px; color:var(--text-2); font-size:.85rem;">${star}\u2605</span>
+            <span class="rank-bar-wrap"><span class="rank-bar" style="width:${pct}%;"></span></span>
+            <span class="rank-qty">${n}</span></div>`;
+        }).join('')
+      : '';
+
+    const fbBody = reviewed.length
+      ? reviewed.map(o=>`<div class="fb-item">
+          <div class="fb-head"><span style="font-weight:500;">${esc(o.customer_name)}</span>${starsRO(o.review_rating)}</div>
+          <p class="muted" style="margin:2px 0 0;">${fmtDateTime(o.reviewed_at||o.created_at)}</p>
+          <div class="oitems" style="margin:8px 0 0;">${itemLinesHtml(byOrder[o.id])}</div>
+          ${o.review_text?`<p class="review-quote" style="margin-top:8px;">\u201C${esc(o.review_text)}\u201D</p>`:'<p class="muted" style="margin-top:6px; font-size:.8rem;">No comment left.</p>'}
+        </div>`).join('')
+      : '<p class="muted">No feedback yet. Reviews customers leave will show up here.</p>';
+
+    body=`<h3>&#128202; Analytics</h3>
+      <div class="stats">
+        <div class="stat"><p class="lbl">Items sold</p><p class="val">${totalUnits}</p></div>
+        <div class="stat"><p class="lbl">Avg rating</p><p class="val">${reviewed.length?avgAll.toFixed(1):'\u2014'}</p></div>
+        <div class="stat"><p class="lbl">Reviews</p><p class="val">${reviewed.length}</p></div>
+      </div>
+      <div class="card"><h3>&#127942; Top ordered items <span class="muted" style="font-weight:400; font-size:.8rem;">(all time, by quantity)</span></h3>${topBody}</div>
+      ${reviewed.length?`<div class="card"><h3>&#11088; Rating breakdown</h3>${distBody}</div>`:''}
+      <h3 style="margin-top:1.25rem;">&#128172; Feedback history</h3>${fbBody}`;
   }
 
   el.innerHTML=subbar+body;
