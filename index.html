@@ -157,6 +157,7 @@
   .rank-qty{flex-shrink:0; font-weight:600; color:var(--accent-fg); min-width:46px; text-align:right;}
   .fb-item{padding:11px 13px; border:0.5px solid var(--border); border-radius:var(--radius-sm); margin-bottom:8px; background:var(--surface);}
   .fb-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .org-closed{opacity:.6;}
 </style>
 </head>
 <body>
@@ -312,12 +313,39 @@ function uiModal({title, body, withInput=false, inputPlaceholder='', okText='Con
 const uiConfirm=(title,body)=>uiModal({title,body,okText:'Confirm',cancelText:'Cancel'});
 const uiPrompt=(title,body,placeholder)=>uiModal({title,body,withInput:true,inputPlaceholder:placeholder||'',okText:'OK',cancelText:'Cancel'});
 
+// A menu's date as a Date at local midnight (start of that day).
+function menuDayStart(menu){
+  const key = menu && menu.menu_date ? menu.menu_date : dayKey(Date.now());
+  const d = new Date(key+'T00:00:00');
+  return isNaN(d) ? new Date(new Date().setHours(0,0,0,0)) : d;
+}
+function todayKey(){ return dayKey(Date.now()); }
+
+// Is ordering closed for this menu right now?
+//  - manually closed (is_open=false)            -> closed
+//  - menu_date is in the past                   -> closed
+//  - has a cutoff_time and we're past it ON the -> closed
+//    menu's date (future dates not yet at cutoff are open)
+//  - no cutoff: open through end of menu_date    -> closed only once the day has passed
 function isClosed(menu){
-  if(!menu || !menu.is_open) return true;
-  if(!menu.cutoff_time) return false;
+  if(!menu || menu.is_open===false) return true;
+  const key = menu.menu_date || todayKey();
+  const tk = todayKey();
+  if(key < tk) return true;                 // any past-dated menu is closed
+  if(key > tk) return false;                // future menu: open (until its day/cutoff)
+  // menu is for today:
+  if(!menu.cutoff_time) return false;       // no cutoff -> open all of today
   const [h,m]=menu.cutoff_time.split(':').map(Number);
   const cut=new Date(); cut.setHours(h,m,0,0);
-  return new Date()>cut;
+  return new Date()>cut;                     // closed once we pass today's cutoff
+}
+
+// Should this menu appear in the customer Browse list at all?
+// Rule: only today or upcoming. Anything dated before today drops off,
+// whether it was closed by cutoff or manually.
+function showsInBrowse(menu){
+  if(!menu || !menu.menu_date) return true;  // dateless legacy menu: keep
+  return menu.menu_date >= todayKey();
 }
 function timeLabel(t){
   if(!t) return '';
@@ -422,15 +450,26 @@ async function viewBrowse(){
   v.innerHTML='<h2>Organizers</h2><p class="muted">Loading...</p>';
   const {data:orgs} = await sb.from('profiles').select('*').eq('role','organizer').eq('status','approved').order('display_name');
   if(!orgs || !orgs.length){ v.innerHTML='<h2>Organizers</h2><p class="muted">No organizers yet. Check back soon.</p>'; return; }
-  // get today-ish latest menu per organizer
+  // get menus, then keep only today/upcoming for the Browse list
   const {data:menus} = await sb.from('menus').select('*').order('created_at',{ascending:false});
-  const latest={}; (menus||[]).forEach(m=>{ if(!latest[m.organizer_id]) latest[m.organizer_id]=m; });
+  const visibleMenus=(menus||[]).filter(showsInBrowse);
+  // prefer the soonest upcoming/today menu per organizer (by menu_date, then newest)
+  const latest={};
+  visibleMenus.forEach(m=>{
+    const cur=latest[m.organizer_id];
+    if(!cur) { latest[m.organizer_id]=m; return; }
+    if((m.menu_date||'') < (cur.menu_date||'')) latest[m.organizer_id]=m; // earlier (closer) date wins
+  });
   v.innerHTML='<h2>Organizers</h2>'+orgs.map(o=>{
     const m=latest[o.id];
-    const sub = m ? (isClosed(m)?'Ordering closed':('Menu posted'+(m.cutoff_time?' \u00B7 until '+timeLabel(m.cutoff_time):''))) : 'No menu yet';
-    return `<div class="org-card" data-id="${o.id}">
+    const closed = m && isClosed(m);
+    const dateNote = m ? (m.menu_date && m.menu_date>todayKey() ? fmtDate(m.menu_date)+' \u00B7 ' : '') : '';
+    const sub = m
+      ? (closed ? '&#128274; Ordering closed' : (dateNote+'Menu posted'+(m.cutoff_time?' \u00B7 until '+timeLabel(m.cutoff_time):'')))
+      : 'No menu yet';
+    return `<div class="org-card${closed?' org-closed':''}" data-id="${o.id}">
       <div class="row" style="justify-content:space-between;">
-        <span style="font-weight:500;">${esc(o.display_name)}</span>
+        <span style="font-weight:500;">${esc(o.display_name)}${closed?' <span class="pill p-pending" style="margin-left:6px;">Closed</span>':''}</span>
         <span class="muted">&#8250;</span>
       </div>
       <p class="muted" style="margin:4px 0 0;">${sub}</p>
@@ -451,7 +490,9 @@ async function viewOrganizerMenu(orgId){
   const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id);
   html+=`<p class="muted" style="margin:0 0 8px;">${fmtDate(menu.menu_date)}</p>`;
   const closed=isClosed(menu);
-  html+= closed ? `<div class="closed-banner">&#128274; Ordering is closed${menu.cutoff_time?' (cutoff was '+timeLabel(menu.cutoff_time)+')':''}</div>`
+  const closedMsg = menu.is_open===false ? ' (closed by organizer)'
+                   : (menu.cutoff_time ? ' (cutoff was '+timeLabel(menu.cutoff_time)+')' : '');
+  html+= closed ? `<div class="closed-banner">&#128274; Ordering is closed${closedMsg}</div>`
                 : (menu.cutoff_time?`<p class="cutoff-info">&#128336; Order before ${timeLabel(menu.cutoff_time)}</p>`:'');
   html+=(items||[]).map((it,i)=> closed
     ? `<div class="pick" style="opacity:.5;"><span style="flex:1;">${esc(it.name)}</span><span class="price">${peso(it.price)}</span></div>`
@@ -687,6 +728,7 @@ async function viewOrganizer(){
       </div>
       <button id="m-publish" class="primary" style="width:100%; margin-top:12px;">Publish new menu</button>
     </div>
+    ${menu?menuStatusCard(menu):''}
     <div id="org-orders"></div>`;
   v.innerHTML=html;
   orgDraft=[];
@@ -694,9 +736,55 @@ async function viewOrganizer(){
   $('f-add').onclick=()=>{const n=$('f-name'),p=$('f-price'); if(!n.value.trim())return; orgDraft.push({name:n.value.trim(),price:Number(p.value)||0}); n.value='';p.value='';renderBuilder();n.focus();};
   $('m-cutoff-on').onchange=e=>{ $('m-cutoff').style.display=e.target.checked?'block':'none'; };
   $('m-publish').onclick=publishMenu;
+  const tg=$('m-toggle-open'); if(tg) tg.onclick=()=>toggleMenuOpen(menu);
   orgFilter={ date:'all', status:'all' };
   orgSubTab='prepare';
   loadOrgOrders(menu);
+}
+
+// Status card for the organizer's current menu, with a manual Close / Reopen control.
+function menuStatusCard(menu){
+  const closed=isClosed(menu);
+  const manual = menu.is_open===false;
+  const past = (menu.menu_date||todayKey()) < todayKey();
+  let reason='';
+  if(manual) reason='You closed this menu manually.';
+  else if(past) reason='This menu\u2019s date has passed.';
+  else if(closed && menu.cutoff_time) reason='Cutoff time ('+timeLabel(menu.cutoff_time)+') has passed.';
+  else if(menu.cutoff_time) reason='Accepting orders until '+timeLabel(menu.cutoff_time)+'.';
+  else reason='Accepting orders through end of '+fmtDate(menu.menu_date)+'.';
+  const pill = closed
+    ? '<span class="pill p-pending">&#128274; Closed</span>'
+    : '<span class="pill p-conf">&#128275; Open</span>';
+  // Reopen only makes sense while the menu's date is today or future
+  // (reopening a past-dated menu wouldn't show in Browse anyway).
+  const canReopen = manual && !past;
+  let btn='';
+  if(!closed){
+    btn=`<button id="m-toggle-open" class="small-btn danger" style="margin-top:10px;">Close menu now</button>`;
+  } else if(canReopen){
+    btn=`<button id="m-toggle-open" class="small-btn" style="margin-top:10px;">Reopen menu</button>`;
+  }
+  return `<div class="card">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <span style="font-weight:500;">Current menu \u00B7 ${fmtDate(menu.menu_date)}</span>${pill}
+    </div>
+    <p class="muted" style="margin:6px 0 0;">${reason}</p>
+    ${btn}
+  </div>`;
+}
+
+// Flip is_open and refresh the organizer view.
+async function toggleMenuOpen(menu){
+  if(!menu) return;
+  const closingNow = menu.is_open!==false && !isClosed(menu);
+  if(closingNow){
+    const ok=await uiConfirm('Close menu?', 'Customers won\u2019t be able to place new orders for this menu. You can reopen it later today if needed.');
+    if(!ok) return;
+  }
+  const {error}=await sb.from('menus').update({is_open: !(menu.is_open===false)}).eq('id',menu.id);
+  if(error){ alert(error.message); return; }
+  viewOrganizer();
 }
 function renderBuilder(){
   const el=$('builder'); if(!el) return;
