@@ -58,9 +58,8 @@
   .deliver{background:var(--ok-bg); color:var(--ok-fg); border-color:var(--ok-fg); font-weight:500;}
   .danger{background:var(--danger-bg); color:var(--danger-fg); border-color:var(--danger-fg); font-weight:500;}
   .card{background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius); padding:1rem 1.1rem; margin-bottom:1rem;}
-  .tabs{display:flex; gap:4px; margin:2px 0 .25rem; padding:4px; background:var(--surface-2); border-radius:999px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;}
-  .tabs::-webkit-scrollbar{display:none;}
-  .tabs button{flex:1 0 auto; min-height:38px; padding:0 16px; white-space:nowrap; font-size:.9rem; font-weight:500; border:none; background:transparent; color:var(--text-2); border-radius:999px; transition:background .15s, color .15s;}
+  .tabs{display:flex; gap:3px; margin:2px 0 .25rem; padding:4px; background:var(--surface-2); border-radius:999px;}
+  .tabs button{flex:1 1 0; min-width:0; min-height:38px; padding:0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.88rem; font-weight:500; border:none; background:transparent; color:var(--text-2); border-radius:999px; transition:background .15s, color .15s;}
   .tabs button.active{background:var(--navy); color:#fff; font-weight:600; box-shadow:0 2px 6px rgba(20,48,77,0.25);}
   .row{display:flex; align-items:center; gap:8px;}
   .stats{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:1rem 0;}
@@ -366,8 +365,8 @@ async function boot(){
 function buildTabs(){
   const tabs=[];
   tabs.push(['browse','Browse']);
-  tabs.push(['myorders','My orders']);
-  if(me.role==='organizer' && me.status==='approved') tabs.push(['organizer','My menu']);
+  tabs.push(['myorders','Orders']);
+  if(me.role==='organizer' && me.status==='approved') tabs.push(['organizer','Menu']);
   if(me.role==='admin') tabs.push(['admin','Admin']);
   tabs.push(['account','Account']);
   activeTab = tabs.some(t=>t[0]===activeTab)?activeTab:'browse';
