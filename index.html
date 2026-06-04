@@ -106,6 +106,9 @@
   .prep-row{display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(245,160,60,0.25); font-size:.95rem;}
   .prep-row:last-child{border-bottom:none;}
   .prep-qty{font-weight:600; color:var(--accent-fg); background:var(--surface); border:0.5px solid var(--accent-bd); border-radius:var(--radius-sm); padding:2px 12px; min-width:40px; text-align:center;}
+  .prep-summary{margin-top:12px; padding-top:10px; border-top:1px solid rgba(245,160,60,0.4);}
+  .prep-sum-row{display:flex; align-items:center; justify-content:space-between; padding:4px 0; font-size:.9rem; color:var(--text-2);}
+  .prep-sum-row.grand{font-size:1rem; font-weight:700; color:var(--accent-fg); padding-top:8px; margin-top:4px; border-top:0.5px dashed rgba(245,160,60,0.5);}
   .oi{display:flex; justify-content:space-between; font-size:.9rem; padding:3px 0; color:var(--text-2);}
   .oi .q{color:var(--text); font-weight:600; margin-right:8px;}
   .oitems{margin:8px 0; padding:8px 12px; background:var(--surface-2); border-radius:var(--radius-sm);}
@@ -956,9 +959,21 @@ async function loadOrgOrders(menu){
     (allItems||[]).forEach(it=>{ if(shownIds.has(it.order_id)) agg[it.name]=(agg[it.name]||0)+Number(it.qty||1); });
     const totalItems=Object.values(agg).reduce((s,n)=>s+n,0);
     const prepDate = orgFilter.date==='all' ? 'all dates' : dayLabel(orgFilter.date);
+    const orderCount=shown.length;
+    const grandTotal=shown.reduce((s,o)=>s+Number(o.total||0),0);
+    const deliveryTotal=shown.reduce((s,o)=>s+Number(o.delivery_fee||0),0);
+    const subtotal=grandTotal-deliveryTotal;
+    const prepSummary = totalItems
+      ? `<div class="prep-summary">
+           <div class="prep-sum-row"><span>Orders</span><span>${orderCount}</span></div>
+           <div class="prep-sum-row"><span>Subtotal</span><span>${peso(subtotal)}</span></div>
+           ${deliveryTotal>0?`<div class="prep-sum-row"><span>Delivery</span><span>${peso(deliveryTotal)}</span></div>`:''}
+           <div class="prep-sum-row grand"><span>Grand total</span><span>${peso(grandTotal)}</span></div>
+         </div>`
+      : '';
     const prepBody = totalItems
       ? Object.entries(agg).sort((a,b)=>b[1]-a[1]).map(([name,qty])=>
-          `<div class="prep-row"><span>${esc(name)}</span><span class="prep-qty">${qty}\u00D7</span></div>`).join('')
+          `<div class="prep-row"><span>${esc(name)}</span><span class="prep-qty">${qty}\u00D7</span></div>`).join('')+prepSummary
       : '<p class="muted" style="margin:4px 0 0;">Nothing left to prepare \u2014 all delivered. \u{1F389}</p>';
     body=filterBar(true)+`<div class="prep"><h3>&#127859; To prepare \u2014 ${prepDate} (${totalItems} item${totalItems!==1?'s':''})</h3>${prepBody}</div>`;
   }
