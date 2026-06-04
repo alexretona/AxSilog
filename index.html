@@ -80,8 +80,11 @@
   .subtab-count{font-size:11px; opacity:.7;}
   .order{background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius); padding:13px 15px; margin-bottom:10px;}
   .muted{font-size:13px; color:var(--text-3);}
-  .pick{display:flex; align-items:center; gap:12px; background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:14px 15px; margin-bottom:10px; cursor:pointer;}
+  .pick{display:flex; align-items:center; gap:12px; background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:14px 15px; margin-bottom:10px;}
   .pick input{width:24px; height:24px; flex-shrink:0;}
+  .qty-stepper{display:flex; align-items:center; gap:0; flex-shrink:0;}
+  .qty-stepper button{min-height:36px; width:36px; padding:0; font-size:20px; line-height:1; border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:center;}
+  .qty-stepper .qval{min-width:34px; text-align:center; font-size:16px; font-weight:500;}
   a{color:var(--info-fg);}
   .small-btn{min-height:40px; padding:0 14px; font-size:14px;}
   .reset{background:none; border:none; color:var(--text-3); font-size:13px; cursor:pointer; padding:0; min-height:auto; text-decoration:underline;}
@@ -113,6 +116,19 @@
   .slider:before{content:""; position:absolute; height:22px; width:22px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s;}
   .switch input:checked + .slider{background:var(--info-bd);}
   .switch input:checked + .slider:before{transform:translateX(20px);}
+  .modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; padding:20px; z-index:1000;}
+  .modal-backdrop.hide{display:none;}
+  .modal{background:var(--surface); border:0.5px solid var(--border-2); border-radius:var(--radius); padding:20px; width:100%; max-width:380px; max-height:85vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.3);}
+  .modal h3{margin:0 0 12px;}
+  .modal-body-text{white-space:pre-wrap; font-size:14px; color:var(--text-2); margin:0 0 14px; max-height:40vh; overflow-y:auto;}
+  .modal-actions{display:flex; gap:8px; margin-top:16px;}
+  .modal-actions button{flex:1;}
+  #modal-input{width:100%; margin-bottom:4px;}
+  .bd-list{display:flex; flex-direction:column; gap:6px; max-height:38vh; overflow-y:auto;}
+  .bd-row{display:flex; align-items:center; gap:10px; padding:9px 10px; border:0.5px solid var(--border); border-radius:var(--radius-sm); background:var(--surface);}
+  .bd-row input{width:20px; height:20px; flex-shrink:0;}
+  .bd-row .bd-name{flex:1; font-size:14px;}
+  #modal-ok:disabled{opacity:.45;}
 </style>
 </head>
 <body>
@@ -151,10 +167,10 @@
         <option>Others</option>
       </select>
     </div>
-    <label class="fld">Email</label>
-    <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" style="margin-bottom:12px;">
-    <label class="fld">Password</label>
-    <input type="password" id="auth-pass" placeholder="At least 6 characters" autocomplete="current-password" style="margin-bottom:14px;">
+    <label class="fld">Email <span style="color:var(--danger-fg);">*</span></label>
+    <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" required style="margin-bottom:12px;">
+    <label class="fld">Password <span style="color:var(--danger-fg);">*</span></label>
+    <input type="password" id="auth-pass" placeholder="At least 6 characters" autocomplete="current-password" required style="margin-bottom:14px;">
     <button id="btn-login" class="primary" style="width:100%; margin-bottom:8px;">Log in</button>
     <button id="btn-signup" style="width:100%;">Create account</button>
     <p id="auth-err" class="err"></p>
@@ -184,6 +200,18 @@
   </div>
 </div>
 
+<div id="modal-backdrop" class="modal-backdrop hide">
+  <div class="modal">
+    <h3 id="modal-title"></h3>
+    <div id="modal-body"></div>
+    <div id="modal-input-wrap" class="hide"><input type="text" id="modal-input" inputmode="decimal"></div>
+    <div class="modal-actions">
+      <button id="modal-cancel">Cancel</button>
+      <button id="modal-ok" class="primary">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ====== CONFIG — paste your Supabase values (see SETUP.md) ======
 const SUPABASE_URL = "https://nstktluzwkdnewobjnep.supabase.co";
@@ -206,6 +234,40 @@ function teamSelectHtml(id, current){
     .concat(TEAMS.map(t=>`<option${t===current?' selected':''}>${esc(t)}</option>`));
   return `<select id="${id}" style="margin-bottom:10px;">${opts.join('')}</select>`;
 }
+// Render an order's item lines honoring qty (falls back to 1 for legacy rows)
+function itemLinesHtml(items){
+  return (items||[]).map(it=>{
+    const n=Number(it.qty||1), price=Number(it.price);
+    return `<div class="oi"><span><span class="q">${n}\u00D7</span>${esc(it.name)}</span><span class="price">${peso(price*n)}</span></div>`;
+  }).join('');
+}
+// Total quantity of a single item across an order list (for the prep summary)
+function sumQty(it){ return Number(it.qty||1); }
+// A delivery-fee line if the order carries one
+function deliveryLineHtml(fee){
+  fee=Number(fee||0);
+  return fee>0 ? `<div class="oi"><span>&#128666; Delivery fee</span><span class="price">${peso(fee)}</span></div>` : '';
+}
+// In-app modal (replaces window.confirm/prompt, which are blocked in installed PWAs)
+function uiModal({title, body, withInput=false, inputPlaceholder='', okText='Confirm', cancelText='Cancel'}){
+  return new Promise(resolve=>{
+    const bd=$('modal-backdrop');
+    $('modal-title').textContent=title||'';
+    $('modal-body').innerHTML = body ? `<div class="modal-body-text">${body}</div>` : '';
+    const iw=$('modal-input-wrap'), inp=$('modal-input');
+    if(withInput){ iw.classList.remove('hide'); inp.value=''; inp.placeholder=inputPlaceholder; } else { iw.classList.add('hide'); }
+    $('modal-ok').textContent=okText;
+    $('modal-cancel').textContent=cancelText;
+    bd.classList.remove('hide');
+    if(withInput) setTimeout(()=>inp.focus(),50);
+    const close=val=>{ bd.classList.add('hide'); $('modal-ok').onclick=null; $('modal-cancel').onclick=null; bd.onclick=null; resolve(val); };
+    $('modal-ok').onclick=()=> close(withInput ? inp.value : true);
+    $('modal-cancel').onclick=()=> close(withInput ? null : false);
+    bd.onclick=e=>{ if(e.target===bd) close(withInput?null:false); };
+  });
+}
+const uiConfirm=(title,body)=>uiModal({title,body,okText:'Confirm',cancelText:'Cancel'});
+const uiPrompt=(title,body,placeholder)=>uiModal({title,body,withInput:true,inputPlaceholder:placeholder||'',okText:'OK',cancelText:'Cancel'});
 
 function isClosed(menu){
   if(!menu || !menu.is_open) return true;
@@ -252,7 +314,9 @@ async function doSignup(){
   $('auth-err').textContent=''; $('auth-err').style.color='var(--danger-fg)';
   if(!name){ $('auth-err').textContent='Please enter your name.'; return; }
   if(!contact){ $('auth-err').textContent='Please enter a contact number.'; return; }
-  if(!email||pass.length<6){ $('auth-err').textContent='Enter an email and a password of 6+ characters.'; return; }
+  if(!email){ $('auth-err').textContent='Please enter an email \u2014 you\u2019ll use it to log in.'; return; }
+  if(!/^\S+@\S+\.\S+$/.test(email)){ $('auth-err').textContent='Please enter a valid email address.'; return; }
+  if(pass.length<6){ $('auth-err').textContent='Password must be at least 6 characters.'; return; }
   pendingProfile={ display_name:name, contact, team:team||null };
   const {data,error}=await sb.auth.signUp({email,password:pass});
   if(error){ $('auth-err').textContent=error.message; pendingProfile=null; return; }
@@ -348,7 +412,14 @@ async function viewOrganizerMenu(orgId){
                 : (menu.cutoff_time?`<p class="cutoff-info">&#128336; Order before ${timeLabel(menu.cutoff_time)}</p>`:'');
   html+=(items||[]).map((it,i)=> closed
     ? `<div class="pick" style="opacity:.5;"><span style="flex:1;">${esc(it.name)}</span><span class="price">${peso(it.price)}</span></div>`
-    : `<label class="pick"><input type="checkbox" class="opt" data-i="${i}"><span style="flex:1;">${esc(it.name)}</span><span class="price">${peso(it.price)}</span></label>`
+    : `<div class="pick">
+         <span style="flex:1;">${esc(it.name)}<br><span class="price" style="font-size:13px;">${peso(it.price)}</span></span>
+         <div class="qty-stepper">
+           <button type="button" class="qminus" data-i="${i}">\u2212</button>
+           <span class="qval" id="q${i}" data-i="${i}">0</span>
+           <button type="button" class="qplus" data-i="${i}">+</button>
+         </div>
+       </div>`
   ).join('');
   if(!closed){
     html+=`<div class="card" style="margin-top:8px;">
@@ -358,23 +429,25 @@ async function viewOrganizerMenu(orgId){
   v.innerHTML=html;
   (document.getElementById('back-browse2')||{}).onclick=()=>{viewingOrganizer=null; viewBrowse(); scrollTo(0,0);};
   if(!closed){
-    const recalc=()=>{const t=[...v.querySelectorAll('.opt:checked')].reduce((s,c)=>s+Number(items[+c.dataset.i].price),0); $('ct').textContent=peso(t);};
-    v.querySelectorAll('.opt').forEach(c=>c.onchange=recalc);
-    $('place').onclick=()=>placeOrder(menu, org, items, v);
+    const qty=(items||[]).map(()=>0);
+    const recalc=()=>{ const t=items.reduce((s,it,i)=>s+Number(it.price)*qty[i],0); $('ct').textContent=peso(t); };
+    v.querySelectorAll('.qplus').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; qty[i]++; $('q'+i).textContent=qty[i]; recalc(); });
+    v.querySelectorAll('.qminus').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; if(qty[i]>0){qty[i]--; $('q'+i).textContent=qty[i]; recalc();} });
+    $('place').onclick=()=>placeOrder(menu, org, items, qty);
   }
 }
 
-async function placeOrder(menu, org, items, v){
+async function placeOrder(menu, org, items, qty){
   if(isClosed(menu)){ alert('Ordering has closed.'); viewOrganizerMenu(org.id); return; }
-  const picks=[...v.querySelectorAll('.opt:checked')].map(c=>items[+c.dataset.i]);
-  if(!picks.length){ alert('Pick at least one item.'); return; }
-  const total=picks.reduce((s,m)=>s+Number(m.price),0);
+  const picks=items.map((it,i)=>({...it, qty:qty[i]})).filter(p=>p.qty>0);
+  if(!picks.length){ alert('Add at least one item (use + to set a quantity).'); return; }
+  const total=picks.reduce((s,p)=>s+Number(p.price)*p.qty,0);
   const {data:order,error}=await sb.from('orders').insert({
     menu_id:menu.id, organizer_id:org.id, customer_id:me.id,
     customer_name:me.display_name, customer_contact:me.contact||null, total, status:'new'
   }).select().single();
   if(error){ alert(error.message); return; }
-  await sb.from('order_items').insert(picks.map(p=>({order_id:order.id, name:p.name, price:p.price})));
+  await sb.from('order_items').insert(picks.map(p=>({order_id:order.id, name:p.name, price:p.price, qty:p.qty})));
   alert('Order placed! Track it under "My orders".');
   viewingOrganizer=null; activeTab='myorders'; buildTabs();
 }
@@ -393,9 +466,7 @@ async function viewMyOrders(){
   const orgName={}; (orgs||[]).forEach(o=>{orgName[o.id]=o.display_name;});
   v.innerHTML='<h2>My orders</h2>'+orders.map(o=>{
     const statusPill = o.delivered?'<span class="pill p-delivered">Delivered \u2713</span>':(o.status==='confirmed'?'<span class="pill p-conf">Confirmed</span>':'<span class="pill p-new">New</span>');
-    const q={}; (byOrder[o.id]||[]).forEach(it=>{ q[it.name]=q[it.name]||{n:0,price:Number(it.price)}; q[it.name].n++; });
-    const itemLines=Object.entries(q).map(([name,info])=>
-      `<div class="oi"><span><span class="q">${info.n}\u00D7</span>${esc(name)}</span><span class="price">${peso(info.price*info.n)}</span></div>`).join('');
+    const itemLines=itemLinesHtml(byOrder[o.id])+deliveryLineHtml(o.delivery_fee);
     let payblock='';
     if(o.delivered && !o.paid){
       payblock=`<div style="margin-top:10px;">
@@ -544,9 +615,7 @@ async function loadOrgOrders(menu){
 
   function activeCard(o){
     const statusPill=o.status==='confirmed'?'<span class="pill p-conf">Confirmed</span>':'<span class="pill p-new">New</span>';
-    const q={}; (byOrder[o.id]||[]).forEach(it=>{ q[it.name]=q[it.name]||{n:0,price:Number(it.price)}; q[it.name].n++; });
-    const itemLines=Object.entries(q).map(([name,info])=>
-      `<div class="oi"><span><span class="q">${info.n}\u00D7</span>${esc(name)}</span><span class="price">${peso(info.price*info.n)}</span></div>`).join('');
+    const itemLines=itemLinesHtml(byOrder[o.id])+deliveryLineHtml(o.delivery_fee);
     const actions = o.status==='confirmed'
       ? `<button class="small-btn unc" data-id="${o.id}">Undo confirm</button>
          <button class="small-btn deliver dv" data-id="${o.id}">Delivered</button>`
@@ -566,7 +635,7 @@ async function loadOrgOrders(menu){
   if(orgSubTab==='prepare'){
     const shownIds=new Set(shown.map(o=>o.id));
     const agg={};
-    (allItems||[]).forEach(it=>{ if(shownIds.has(it.order_id)) agg[it.name]=(agg[it.name]||0)+1; });
+    (allItems||[]).forEach(it=>{ if(shownIds.has(it.order_id)) agg[it.name]=(agg[it.name]||0)+Number(it.qty||1); });
     const totalItems=Object.values(agg).reduce((s,n)=>s+n,0);
     const prepDate = orgFilter.date==='all' ? 'all dates' : dayLabel(orgFilter.date);
     const prepBody = totalItems
@@ -578,7 +647,11 @@ async function loadOrgOrders(menu){
   else if(orgSubTab==='incoming'){
     const cards=shown.length? shown.map(activeCard).join('') : '<p class="muted">No active orders match this filter.</p>';
     const countNote=`<p class="muted" style="margin:0 0 8px;">Showing ${shown.length} of ${active.length} active order${active.length!==1?'s':''}</p>`;
-    body=filterBar(true)+`<h3>Incoming orders</h3>`+countNote+cards;
+    const batchScope = orgFilter.date==='all' ? 'all active orders' : dayLabel(orgFilter.date)+"'s orders";
+    const batchBtn = shown.length
+      ? `<button id="batch-deliver" class="primary" style="width:100%; margin:0 0 12px;">&#128666; Mark ${shown.length} order${shown.length!==1?'s':''} delivered (${batchScope})</button>`
+      : '';
+    body=filterBar(true)+`<h3>Incoming orders</h3>`+countNote+batchBtn+cards;
   }
   else { // history
     if(!history.length){
@@ -599,9 +672,7 @@ async function loadOrgOrders(menu){
         const payPill = o.paid
           ? '<span class="pill p-delivered">Paid \u2713</span>'
           : (o.proof_url?'<span class="pill p-conf">Proof received</span>':'<span class="pill p-pending">Unpaid</span>');
-        const q={}; (byOrder[o.id]||[]).forEach(it=>{ q[it.name]=q[it.name]||{n:0,price:Number(it.price)}; q[it.name].n++; });
-        const itemLines=Object.entries(q).map(([name,info])=>
-          `<div class="oi"><span><span class="q">${info.n}\u00D7</span>${esc(name)}</span><span class="price">${peso(info.price*info.n)}</span></div>`).join('');
+        const itemLines=itemLinesHtml(byOrder[o.id])+deliveryLineHtml(o.delivery_fee);
         let actions;
         if(!o.paid){
           actions = o.proof_url
@@ -637,6 +708,93 @@ async function loadOrgOrders(menu){
   el.querySelectorAll('.dv').forEach(b=>b.onclick=async()=>{await sb.from('orders').update({delivered:true,status:'confirmed'}).eq('id',b.dataset.id); loadOrgOrders(menu);});
   el.querySelectorAll('.undo').forEach(b=>b.onclick=async()=>{await sb.from('orders').update({delivered:false}).eq('id',b.dataset.id); loadOrgOrders(menu);});
   el.querySelectorAll('.pd').forEach(b=>b.onclick=async()=>{await sb.from('orders').update({paid:true}).eq('id',b.dataset.id); loadOrgOrders(menu);});
+  const bd=el.querySelector('#batch-deliver');
+  if(bd) bd.onclick=()=>batchDeliver(shown, byOrder, menu);
+}
+
+// Mark a batch of active orders delivered. The organizer ticks which orders
+// were actually delivered; an optional delivery fee is split evenly across the
+// unique checked customers (and across each customer's checked orders).
+function batchDeliver(batch, byOrder, menu){
+  if(!batch.length){ return; }
+  const rows=batch.map(o=>
+    `<label class="bd-row">
+       <input type="checkbox" class="bd-chk" data-id="${o.id}" data-cust="${esc(String(o.customer_id))}" checked>
+       <span class="bd-name">${esc(o.customer_name)}</span>
+       <span class="price">${peso(o.total)}</span>
+     </label>`).join('');
+  const bodyHtml=`
+    <p class="muted" style="margin:0 0 10px;">Tick the orders that were delivered. The delivery fee (if any) is split evenly across the checked customers.</p>
+    <div class="bd-list">${rows}</div>
+    <label class="fld" style="margin-top:12px;">Total delivery fee (optional)</label>
+    <input type="text" id="bd-fee" inputmode="decimal" placeholder="e.g. 100" style="width:100%; margin-bottom:8px;">
+    <p id="bd-readout" class="muted" style="margin:0;"></p>`;
+
+  const bd=$('modal-backdrop');
+  $('modal-title').textContent='Mark orders delivered';
+  $('modal-body').innerHTML=bodyHtml;
+  $('modal-input-wrap').classList.add('hide');
+  $('modal-ok').textContent='Deliver selected';
+  $('modal-cancel').textContent='Cancel';
+  bd.classList.remove('hide');
+
+  const chks=()=>[...$('modal-body').querySelectorAll('.bd-chk')];
+  const checkedOrders=()=> chks().filter(c=>c.checked).map(c=>c.dataset.id);
+  const updateReadout=()=>{
+    const checked=chks().filter(c=>c.checked);
+    const custSet=new Set(checked.map(c=>c.dataset.cust));
+    const n=checked.length, cust=custSet.size;
+    const fee=Number($('bd-fee').value)||0;
+    const per = (fee>0 && cust>0) ? fee/cust : 0;
+    $('bd-readout').innerHTML = n===0
+      ? 'No orders selected.'
+      : `${n} order${n!==1?'s':''} \u00B7 ${cust} customer${cust!==1?'s':''}`+
+        (fee>0?` \u00B7 delivery ${peso(Math.round(per*100)/100)} each`:'');
+    $('modal-ok').disabled = (n===0);
+  };
+  $('modal-body').querySelectorAll('.bd-chk').forEach(c=>c.onchange=updateReadout);
+  $('bd-fee').oninput=updateReadout;
+  updateReadout();
+
+  const close=()=>{ bd.classList.add('hide'); $('modal-ok').onclick=null; $('modal-cancel').onclick=null; bd.onclick=null; $('modal-ok').disabled=false; };
+  $('modal-cancel').onclick=close;
+  bd.onclick=e=>{ if(e.target===bd) close(); };
+  $('modal-ok').onclick=async()=>{
+    const selected=checkedOrders();
+    if(!selected.length) return;
+    const fee=Number($('bd-fee').value)||0;
+    if(fee<0){ return; }
+    const chosen=batch.filter(o=>selected.includes(String(o.id)));
+    close();
+    await applyBatchDeliver(chosen, fee, menu);
+  };
+}
+
+async function applyBatchDeliver(chosen, fee, menu){
+  const custSet=new Set(chosen.map(o=>String(o.customer_id)));
+  const custCount=custSet.size;
+  const byCust={};
+  chosen.forEach(o=>{ (byCust[o.customer_id]=byCust[o.customer_id]||[]).push(o); });
+  const perCustomer = fee>0 ? fee/custCount : 0;
+  const updates=[];
+  Object.values(byCust).forEach(orders=>{
+    const share = perCustomer>0 ? perCustomer/orders.length : 0; // split a customer's share across their orders
+    orders.forEach(o=>{
+      const baseTotal = Number(o.total) - Number(o.delivery_fee||0); // strip prior fee so re-runs don't stack
+      const newFee = Math.round(share*100)/100;
+      const newTotal = Math.round((baseTotal + newFee)*100)/100;
+      updates.push({ id:o.id, delivery_fee:newFee, total:newTotal });
+    });
+  });
+  for(const u of updates){
+    await sb.from('orders').update({ delivered:true, status:'confirmed', delivery_fee:u.delivery_fee, total:u.total }).eq('id', u.id);
+  }
+  if(fee>0){
+    await uiConfirm('Delivered \u2713', `${chosen.length} order(s) marked delivered.<br>Delivery fee ${peso(fee)} split across ${custCount} customer(s) = ${peso(Math.round(perCustomer*100)/100)} each.`);
+  } else {
+    await uiConfirm('Delivered \u2713', `${chosen.length} order(s) marked delivered. No delivery fee added.`);
+  }
+  loadOrgOrders(menu);
 }
 
 // ---------- ADMIN ----------
