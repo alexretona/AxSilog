@@ -485,7 +485,42 @@ async function viewOrganizerMenu(orgId){
   const {data:org}=await sb.from('profiles').select('*').eq('id',orgId).single();
   const {data:menus}=await sb.from('menus').select('*').eq('organizer_id',orgId).order('created_at',{ascending:false}).limit(1);
   const menu=menus&&menus[0];
+  // Pull this organizer's reviews (delivered + rated orders) for the rating summary.
+  const {data:revOrders}=await sb.from('orders').select('*').eq('organizer_id',orgId);
+  const reviews=(revOrders||[]).filter(o=>o.review_rating).sort((a,b)=>new Date(b.reviewed_at||b.created_at)-new Date(a.reviewed_at||a.created_at));
+  const avgRating = reviews.length ? (reviews.reduce((s,o)=>s+Number(o.review_rating),0)/reviews.length) : 0;
+  // Map each reviewed order -> its items, so a review can show what was ordered.
+  const byOrderItems={};
+  if(reviews.length){
+    const revIds=reviews.map(o=>o.id);
+    const {data:revItems}=await sb.from('order_items').select('*').in('order_id',revIds);
+    (revItems||[]).forEach(it=>{ (byOrderItems[it.order_id]=byOrderItems[it.order_id]||[]).push(it); });
+  }
   let html=`<button class="back" id="back-browse2">&#8249; Back to organizers</button><h2 style="margin-top:8px;">${esc(org.display_name)}</h2>`;
+  // Rating summary + collapsible reviews (button keeps the list from blowing up the page).
+  if(reviews.length){
+    const reviewList=reviews.map(o=>{
+      const its=(byOrderItems[o.id]||[]).map(it=>esc(it.name)).join(', ');
+      return `<div class="fb-item">
+        <div class="fb-head"><span style="font-weight:500;">${esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
+        ${its?`<p class="muted" style="margin:3px 0 0; font-size:.8rem;">${its}</p>`:''}
+        ${o.review_text?`<p class="review-quote" style="margin-top:6px;">\u201C${esc(o.review_text)}\u201D</p>`:''}
+      </div>`;
+    }).join('');
+    html+=`<div class="card" style="margin-bottom:10px;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <div class="row" style="gap:8px; align-items:center;">
+          <span class="rating-big" style="font-size:1.4rem;">${avgRating.toFixed(1)}</span>
+          ${starsRO(Math.round(avgRating))}
+          <span class="muted" style="font-size:.82rem;">(${reviews.length})</span>
+        </div>
+        <button class="reset" id="rev-toggle" style="font-weight:500; color:var(--info-fg);">See reviews</button>
+      </div>
+      <div id="rev-list" class="hide" style="margin-top:12px;">${reviewList}</div>
+    </div>`;
+  } else {
+    html+=`<p class="muted" style="margin:0 0 10px;">No reviews yet.</p>`;
+  }
   if(!menu){ v.innerHTML=html+'<p class="muted">No menu posted yet.</p>'; $('back-browse2').onclick=()=>{viewingOrganizer=null; viewBrowse(); scrollTo(0,0);}; return; }
   const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id);
   html+=`<p class="muted" style="margin:0 0 8px;">${fmtDate(menu.menu_date)}</p>`;
@@ -512,6 +547,11 @@ async function viewOrganizerMenu(orgId){
   }
   v.innerHTML=html;
   (document.getElementById('back-browse2')||{}).onclick=()=>{viewingOrganizer=null; viewBrowse(); scrollTo(0,0);};
+  const revToggle=$('rev-toggle');
+  if(revToggle) revToggle.onclick=()=>{
+    const list=$('rev-list'); const open=!list.classList.contains('hide');
+    list.classList.toggle('hide'); revToggle.textContent = open ? 'See reviews' : 'Hide reviews';
+  };
   if(!closed){
     const qty=(items||[]).map(()=>0);
     const recalc=()=>{ const t=items.reduce((s,it,i)=>s+Number(it.price)*qty[i],0); $('ct').textContent=peso(t); };
@@ -546,16 +586,22 @@ async function viewMyOrders(){
   const {data:allItems}=await sb.from('order_items').select('*').in('order_id',ids);
   const byOrder={}; (allItems||[]).forEach(it=>{(byOrder[it.order_id]=byOrder[it.order_id]||[]).push(it);});
   const orgIds=[...new Set(orders.map(o=>o.organizer_id))];
-  const {data:orgs}=await sb.from('profiles').select('id,display_name').in('id',orgIds);
-  const orgName={}; (orgs||[]).forEach(o=>{orgName[o.id]=o.display_name;});
+  const {data:orgs}=await sb.from('profiles').select('id,display_name,payment_qr_url').in('id',orgIds);
+  const orgName={}; const orgQR={}; (orgs||[]).forEach(o=>{orgName[o.id]=o.display_name; orgQR[o.id]=o.payment_qr_url;});
   v.innerHTML='<h2>My orders</h2>'+orders.map(o=>{
     const statusPill = o.delivered?'<span class="pill p-delivered">Delivered \u2713</span>':(o.status==='confirmed'?'<span class="pill p-conf">Confirmed</span>':'<span class="pill p-new">New</span>');
     const itemLines=itemLinesHtml(byOrder[o.id])+deliveryLineHtml(o.delivery_fee);
     let payblock='';
+    const qrUrl=orgQR[o.organizer_id];
+    const qrBlock = qrUrl
+      ? `<button class="reset qr-toggle" data-id="${o.id}" style="font-weight:500; color:var(--info-fg); font-size:.82rem; margin-top:8px;">&#128241; View payment QR</button>
+         <div class="qr-pane hide" id="qr-${o.id}" style="margin-top:8px;"><img src="${esc(qrUrl)}" alt="Payment QR" style="max-width:220px; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);"><p class="muted" style="font-size:.76rem; margin:6px 0 0;">Scan to pay, then upload your proof above.</p></div>`
+      : `<p class="muted" style="font-size:.76rem; margin-top:8px;">Organizer hasn\u2019t set a payment QR \u2014 contact them to arrange payment.</p>`;
     if(o.delivered && !o.paid){
       payblock=`<div style="margin-top:10px;">
         <p style="font-size:.82rem; color:var(--warn-fg); margin:0 0 6px;">&#9203; Payment required \u2014 upload your proof:</p>
         <input type="file" accept="image/*" class="proof-file" data-id="${o.id}" style="font-size:.88rem;">
+        ${qrBlock}
       </div>`;
     } else if(o.paid){
       const proofLink = o.proof_url ? ` \u00B7 <a href="${esc(o.proof_url)}" target="_blank">view proof</a>` : (o.proof_expired ? ` \u00B7 <span class="muted">proof expired</span>` : '');
@@ -564,7 +610,8 @@ async function viewMyOrders(){
       payblock=`<p style="font-size:.82rem; color:var(--text-2); margin:10px 0 0;">Proof uploaded \u00B7 <a href="${esc(o.proof_url)}" target="_blank">view</a> \u00B7 awaiting confirmation</p>`;
     } else if(o.proof_expired){
       payblock=`<p style="font-size:.82rem; color:var(--text-3); margin:10px 0 0;">&#128465;&#65039; Proof file expired (kept 30 days) \u2014 upload again if still needed:</p>
-        <input type="file" accept="image/*" class="proof-file" data-id="${o.id}" style="font-size:.88rem; margin-top:6px;">`;
+        <input type="file" accept="image/*" class="proof-file" data-id="${o.id}" style="font-size:.88rem; margin-top:6px;">
+        ${qrBlock}`;
     } else {
       payblock=`<p class="muted" style="margin:10px 0 0;">Payment after delivery</p>`;
     }
@@ -603,6 +650,10 @@ async function viewMyOrders(){
     </div>`;
   }).join('');
   v.querySelectorAll('.proof-file').forEach(inp=>inp.onchange=e=>uploadProof(e.target.dataset.id, e.target.files[0]));
+  v.querySelectorAll('.qr-toggle').forEach(b=>b.onclick=()=>{
+    const pane=$('qr-'+b.dataset.id); const open=!pane.classList.contains('hide');
+    pane.classList.toggle('hide'); b.innerHTML = (open?'\uD83D\uDCF1 View payment QR':'\uD83D\uDCF1 Hide payment QR');
+  });
   v.querySelectorAll('.cancel').forEach(b=>b.onclick=()=>cancelOrder(b.dataset.id));
   v.querySelectorAll('.stars[id^="rs-"]').forEach(c=>bindStarPicker(c));
   v.querySelectorAll('.save-review').forEach(b=>b.onclick=()=>saveReview(b.dataset.id));
@@ -705,6 +756,23 @@ async function uploadProof(orderId, file){
   viewMyOrders();
 }
 
+// Upload (or replace) the current user's payment QR. Compresses, stores in the
+// 'qr' bucket, saves url+path on the profile. Returns true on success.
+async function uploadQR(file){
+  if(!file) return false;
+  const compressed=await compressImage(file, {maxDim:900, quality:0.8});
+  const isJpeg = compressed!==file;
+  const ext = isJpeg ? 'jpg' : ((file.name.split('.').pop()||'jpg').toLowerCase());
+  const path=`${me.id}/qr-${Date.now()}.${ext}`;
+  const {error:upErr}=await sb.storage.from('qr').upload(path,compressed,{upsert:true, contentType:isJpeg?'image/jpeg':undefined});
+  if(upErr){ alert('QR upload failed: '+upErr.message); return false; }
+  const {data:pub}=sb.storage.from('qr').getPublicUrl(path);
+  const {error}=await sb.from('profiles').update({payment_qr_url:pub.publicUrl, payment_qr_path:path}).eq('id',me.id);
+  if(error){ alert(error.message); return false; }
+  me.payment_qr_url=pub.publicUrl; me.payment_qr_path=path;
+  return true;
+}
+
 // ---------- ORGANIZER (post menu + manage orders) ----------
 let orgDraft=[];
 async function viewOrganizer(){
@@ -729,6 +797,15 @@ async function viewOrganizer(){
       <button id="m-publish" class="primary" style="width:100%; margin-top:12px;">Publish new menu</button>
     </div>
     ${menu?menuStatusCard(menu):''}
+    <div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">&#128179; Payment QR</h3>
+        ${me.payment_qr_url?'<span class="pill p-conf">Set</span>':'<span class="pill p-pending">Missing</span>'}
+      </div>
+      <p class="muted" style="font-size:.78rem; margin:6px 0 8px;">Customers scan this to pay for delivered orders.</p>
+      <div id="qr-current">${me.payment_qr_url?`<img src="${esc(me.payment_qr_url)}" alt="Your payment QR" style="max-width:180px; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);">`:'<p class="muted" style="font-size:.82rem;">No QR uploaded yet.</p>'}</div>
+      <label class="small-btn" style="display:inline-block; margin-top:10px; cursor:pointer;">${me.payment_qr_url?'Replace QR':'Upload QR'}<input type="file" accept="image/*" id="org-qr" style="display:none;"></label>
+    </div>
     <div id="org-orders"></div>`;
   v.innerHTML=html;
   orgDraft=[];
@@ -737,6 +814,12 @@ async function viewOrganizer(){
   $('m-cutoff-on').onchange=e=>{ $('m-cutoff').style.display=e.target.checked?'block':'none'; };
   $('m-publish').onclick=publishMenu;
   const tg=$('m-toggle-open'); if(tg) tg.onclick=()=>toggleMenuOpen(menu);
+  const qrIn=$('org-qr');
+  if(qrIn) qrIn.onchange=async e=>{
+    const f=e.target.files[0]; if(!f) return;
+    const ok=await uploadQR(f);
+    if(ok){ alert('Payment QR updated.'); viewOrganizer(); }
+  };
   orgFilter={ date:'all', status:'all' };
   orgSubTab='prepare';
   loadOrgOrders(menu);
@@ -1141,7 +1224,11 @@ async function viewAccount(){
   if(me.role==='customer'){
     html+=`<div class="card"><h3>Become an organizer</h3>
       <p class="muted" style="margin:0 0 10px;">Apply to post your own daily menu. The admin will review your request.</p>
-      <button id="apply" class="primary" style="width:100%;">Apply to be an organizer</button></div>`;
+      <label class="fld">Payment QR <span style="color:var(--danger-fg);">*</span></label>
+      <p class="muted" style="font-size:.74rem; margin:0 0 6px;">Upload your GCash / Maya / bank QR. Customers scan this to pay after delivery. Required to apply \u2014 you can change it later.</p>
+      <input type="file" accept="image/*" id="apply-qr" style="font-size:.88rem; margin-bottom:6px;">
+      <div id="apply-qr-preview"></div>
+      <button id="apply" class="primary" style="width:100%; margin-top:8px;">Apply to be an organizer</button></div>`;
   } else if(me.role==='organizer' && me.status==='pending'){
     html+=`<div class="card"><p style="color:var(--warn-fg); margin:0;">&#9203; Your organizer application is pending admin approval.</p></div>`;
   }
@@ -1153,11 +1240,24 @@ async function viewAccount(){
     await sb.from('profiles').update({display_name:n, contact:c||null, team:t||null}).eq('id',me.id);
     me.display_name=n; me.contact=c||null; me.team=t||null; alert('Saved.');
   };
-  if($('apply')) $('apply').onclick=async()=>{
-    if(!confirm('Apply to be an organizer?')) return;
-    await sb.from('profiles').update({role:'organizer',status:'pending'}).eq('id',me.id);
-    me.role='organizer'; me.status='pending'; alert('Application sent! The admin will review it.'); buildTabs();
-  };
+  if($('apply')){
+    let pendingQRFile=null;
+    const qrInput=$('apply-qr');
+    qrInput.onchange=e=>{
+      pendingQRFile=e.target.files[0]||null;
+      const prev=$('apply-qr-preview');
+      if(pendingQRFile){ const url=URL.createObjectURL(pendingQRFile); prev.innerHTML=`<img src="${url}" alt="QR preview" style="max-width:160px; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); margin-top:4px;">`; }
+      else prev.innerHTML='';
+    };
+    $('apply').onclick=async()=>{
+      if(!pendingQRFile){ alert('Please upload your payment QR first \u2014 it\u2019s required to become an organizer.'); return; }
+      if(!confirm('Apply to be an organizer?')) return;
+      const ok=await uploadQR(pendingQRFile);
+      if(!ok) return;
+      await sb.from('profiles').update({role:'organizer',status:'pending'}).eq('id',me.id);
+      me.role='organizer'; me.status='pending'; alert('Application sent! The admin will review it.'); buildTabs();
+    };
+  }
 }
 
 const routes={ browse:viewBrowse, myorders:viewMyOrders, organizer:viewOrganizer, admin:viewAdmin, account:viewAccount };
