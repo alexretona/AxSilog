@@ -106,6 +106,27 @@
   .prep-row{display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(245,160,60,0.25); font-size:.95rem;}
   .prep-row:last-child{border-bottom:none;}
   .prep-qty{font-weight:600; color:var(--accent-fg); background:var(--surface); border:0.5px solid var(--accent-bd); border-radius:var(--radius-sm); padding:2px 12px; min-width:40px; text-align:center;}
+  .prep-row-right{display:flex; align-items:center; gap:10px;}
+  .prep-sub{font-size:.86rem; color:var(--text-2); min-width:54px; text-align:right;}
+  .prep-teams{margin-top:12px; padding-top:10px; border-top:1px solid rgba(245,160,60,0.4);}
+  .prep-teams-lbl{font-size:.74rem; color:var(--accent-fg); font-weight:600; text-transform:uppercase; letter-spacing:.03em; margin:0 0 6px;}
+  .prep-team{border-bottom:0.5px solid rgba(245,160,60,0.25);}
+  .prep-team:last-child{border-bottom:none;}
+  .prep-team>summary{display:flex; align-items:baseline; gap:8px; padding:8px 0; list-style:none; cursor:pointer; -webkit-tap-highlight-color:transparent;}
+  .prep-team>summary::-webkit-details-marker{display:none;}
+  .prep-team-caret{flex:0 0 auto; color:var(--accent-fg); font-weight:700; transition:transform .15s; display:inline-block; align-self:center;}
+  .prep-team[open] .prep-team-caret{transform:rotate(90deg);}
+  .prep-team-name{font-weight:600; color:var(--text); flex:0 0 auto;}
+  .prep-team-meta{font-size:.78rem; color:var(--text-3); flex:1 1 auto; text-align:right; padding-right:4px;}
+  .prep-team-amt{font-weight:600; color:var(--accent-fg); flex:0 0 auto; min-width:54px; text-align:right;}
+  .prep-team-orders{padding:2px 0 10px 22px;}
+  .prep-ord{background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:8px 11px; margin-bottom:8px;}
+  .prep-ord:last-child{margin-bottom:0;}
+  .prep-ord-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:4px;}
+  .prep-ord-name{font-weight:600; font-size:.9rem; color:var(--text);}
+  .prep-ord-amt{font-weight:600; font-size:.86rem; color:var(--accent-fg);}
+  .prep-ord-item{display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:.84rem; color:var(--text-2); padding:1px 0;}
+  .prep-ord-q{color:var(--accent-fg); font-weight:600;}
   .prep-summary{margin-top:12px; padding-top:10px; border-top:1px solid rgba(245,160,60,0.4);}
   .prep-sum-row{display:flex; align-items:center; justify-content:space-between; padding:4px 0; font-size:.9rem; color:var(--text-2);}
   .prep-sum-row.grand{font-size:1rem; font-weight:700; color:var(--accent-fg); padding-top:8px; margin-top:4px; border-top:0.5px dashed rgba(245,160,60,0.5);}
@@ -254,7 +275,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let me = null;            // profile row
 let activeTab = '';
 let viewingOrganizer = null; // when a customer opens an organizer's menu
-let orgFilter = { date:'all', status:'all' }; // "My menu" incoming-orders filters
+let orgFilter = { date:'all', status:'all', team:'all' }; // "My menu" incoming-orders filters
 let orgSubTab = 'prepare'; // prepare | incoming | history
 
 const $ = id => document.getElementById(id);
@@ -823,7 +844,7 @@ async function viewOrganizer(){
     const ok=await uploadQR(f);
     if(ok){ alert('Payment QR updated.'); viewOrganizer(); }
   };
-  orgFilter={ date:'all', status:'all' };
+  orgFilter={ date:'all', status:'all', team:'all' };
   orgSubTab='prepare';
   loadOrgOrders(menu);
 }
@@ -898,6 +919,12 @@ async function loadOrgOrders(menu){
   const {data:allItems}=await sb.from('order_items').select('*').in('order_id',ids);
   const byOrder={}; (allItems||[]).forEach(it=>{(byOrder[it.order_id]=byOrder[it.order_id]||[]).push(it);});
 
+  // attach each customer's team/group (lives on the profile, not the order)
+  const custIds=[...new Set(orders.map(o=>o.customer_id).filter(Boolean))];
+  const {data:custProfiles}= custIds.length ? await sb.from('profiles').select('id,team').in('id',custIds) : {data:[]};
+  const teamByCust={}; (custProfiles||[]).forEach(p=>{ teamByCust[p.id]=p.team||null; });
+  orders.forEach(o=>{ o._team = teamByCust[o.customer_id] || 'No team'; });
+
   // split: active (still being handled) vs delivered (history)
   const active=orders.filter(o=>!o.delivered);
   const history=orders.filter(o=>o.delivered);
@@ -920,12 +947,22 @@ async function loadOrgOrders(menu){
     }
   };
   const matchDate=o=> orgFilter.date==='all' || dayKey(o.created_at)===orgFilter.date;
-  const shown=active.filter(o=>matchDate(o)&&matchStatus(o));
+  const teamKeys=[...new Set(active.map(o=>o._team))].sort((a,b)=>{
+    if(a==='No team') return 1; if(b==='No team') return -1; return a.localeCompare(b);
+  });
+  if(orgFilter.team!=='all' && !teamKeys.includes(orgFilter.team)) orgFilter.team='all';
+  const matchTeam=o=> orgFilter.team==='all' || o._team===orgFilter.team;
+  const shown=active.filter(o=>matchDate(o)&&matchStatus(o)&&matchTeam(o));
 
   function filterBar(showStatus){
     const dateChips=`<button class="chip ${orgFilter.date==='all'?'active':''}" data-f="date" data-v="all">All dates</button>`+
       dateKeys.map(k=>`<button class="chip ${orgFilter.date===k?'active':''}" data-f="date" data-v="${k}">${dayLabel(k)}</button>`).join('');
     let h=`<div class="filters"><div><p class="filter-lbl">Filter by date</p><div class="filter-grp">${dateChips}</div></div>`;
+    if(teamKeys.length>1){
+      const teamChips=`<button class="chip ${orgFilter.team==='all'?'active':''}" data-f="team" data-v="all">All teams</button>`+
+        teamKeys.map(t=>`<button class="chip ${orgFilter.team===t?'active':''}" data-f="team" data-v="${esc(t)}">${esc(t)}</button>`).join('');
+      h+=`<div><p class="filter-lbl">Filter by team / group</p><div class="filter-grp">${teamChips}</div></div>`;
+    }
     if(showStatus){
       const statusOpts=[['all','All'],['new','New'],['confirmed','Confirmed']];
       const statusChips=statusOpts.map(([v,l])=>`<button class="chip ${orgFilter.status===v?'active':''}" data-f="status" data-v="${v}">${l}</button>`).join('');
@@ -955,25 +992,78 @@ async function loadOrgOrders(menu){
   let body='';
   if(orgSubTab==='prepare'){
     const shownIds=new Set(shown.map(o=>o.id));
-    const agg={};
-    (allItems||[]).forEach(it=>{ if(shownIds.has(it.order_id)) agg[it.name]=(agg[it.name]||0)+Number(it.qty||1); });
-    const totalItems=Object.values(agg).reduce((s,n)=>s+n,0);
+    const teamOfOrder={}; shown.forEach(o=>{ teamOfOrder[o.id]=o._team; });
+
+    // aggregate qty + money subtotal per item across the shown orders
+    const agg={}; // name -> {qty, amount}
+    (allItems||[]).forEach(it=>{
+      if(!shownIds.has(it.order_id)) return;
+      const q=Number(it.qty||1), amt=Number(it.price||0)*q;
+      const a=agg[it.name]||(agg[it.name]={qty:0,amount:0});
+      a.qty+=q; a.amount+=amt;
+    });
+    const totalItems=Object.values(agg).reduce((s,a)=>s+a.qty,0);
     const prepDate = orgFilter.date==='all' ? 'all dates' : dayLabel(orgFilter.date);
+
     const orderCount=shown.length;
-    const grandTotal=shown.reduce((s,o)=>s+Number(o.total||0),0);
+    const subtotal=Object.values(agg).reduce((s,a)=>s+a.amount,0); // sum of item subtotals
     const deliveryTotal=shown.reduce((s,o)=>s+Number(o.delivery_fee||0),0);
-    const subtotal=grandTotal-deliveryTotal;
+    const grandTotal=subtotal+deliveryTotal;
+
+    const itemRows=Object.entries(agg)
+      .sort((a,b)=>b[1].amount-a[1].amount)
+      .map(([name,a])=>
+        `<div class="prep-row"><span>${esc(name)}</span><span class="prep-row-right"><span class="prep-sub">${peso(a.amount)}</span><span class="prep-qty">${a.qty}\u00D7</span></span></div>`).join('');
+
+    // collapsible breakdown by team/group (only when viewing all teams and >1 team present)
+    let teamBreakdown='';
+    if(orgFilter.team==='all'){
+      const byTeam={}; // team -> {orders:Set, qty, amount}
+      shown.forEach(o=>{ (byTeam[o._team]=byTeam[o._team]||{orders:new Set(),qty:0,amount:0}); });
+      (allItems||[]).forEach(it=>{
+        if(!shownIds.has(it.order_id)) return;
+        const t=teamOfOrder[it.order_id]; const q=Number(it.qty||1);
+        const g=byTeam[t]; g.orders.add(it.order_id); g.qty+=q; g.amount+=Number(it.price||0)*q;
+      });
+      const teamEntries=Object.entries(byTeam).sort((a,b)=>{
+        if(a[0]==='No team') return 1; if(b[0]==='No team') return -1; return b[1].amount-a[1].amount;
+      });
+      if(teamEntries.length>1 && totalItems){
+        const teamBlocks=teamEntries.map(([t,g])=>{
+          const orderList=shown.filter(o=>o._team===t)
+            .sort((a,b)=>String(a.customer_name||'').localeCompare(String(b.customer_name||'')))
+            .map(o=>{
+              const its=(byOrder[o.id]||[]).map(it=>
+                `<div class="prep-ord-item"><span>${esc(it.name)}</span><span class="prep-ord-q">${Number(it.qty||1)}\u00D7</span></div>`).join('');
+              return `<div class="prep-ord">
+                  <div class="prep-ord-head"><span class="prep-ord-name">${esc(o.customer_name||'Customer')}</span><span class="prep-ord-amt">${peso(o.total)}</span></div>
+                  ${its}
+                </div>`;
+            }).join('');
+          return `<details class="prep-team">
+              <summary class="prep-team-row">
+                <span class="prep-team-caret">\u203A</span>
+                <span class="prep-team-name">${esc(t)}</span>
+                <span class="prep-team-meta">${g.orders.size} order${g.orders.size!==1?'s':''} \u00B7 ${g.qty} item${g.qty!==1?'s':''}</span>
+                <span class="prep-team-amt">${peso(g.amount)}</span>
+              </summary>
+              <div class="prep-team-orders">${orderList}</div>
+            </details>`;
+        }).join('');
+        teamBreakdown=`<div class="prep-teams"><p class="prep-teams-lbl">Breakdown by team / group</p>${teamBlocks}</div>`;
+      }
+    }
+
     const prepSummary = totalItems
       ? `<div class="prep-summary">
            <div class="prep-sum-row"><span>Orders</span><span>${orderCount}</span></div>
-           <div class="prep-sum-row"><span>Subtotal</span><span>${peso(subtotal)}</span></div>
-           ${deliveryTotal>0?`<div class="prep-sum-row"><span>Delivery</span><span>${peso(deliveryTotal)}</span></div>`:''}
+           ${deliveryTotal>0?`<div class="prep-sum-row"><span>Items subtotal</span><span>${peso(subtotal)}</span></div>
+           <div class="prep-sum-row"><span>Delivery</span><span>${peso(deliveryTotal)}</span></div>`:''}
            <div class="prep-sum-row grand"><span>Grand total</span><span>${peso(grandTotal)}</span></div>
          </div>`
       : '';
     const prepBody = totalItems
-      ? Object.entries(agg).sort((a,b)=>b[1]-a[1]).map(([name,qty])=>
-          `<div class="prep-row"><span>${esc(name)}</span><span class="prep-qty">${qty}\u00D7</span></div>`).join('')+prepSummary
+      ? itemRows+teamBreakdown+prepSummary
       : '<p class="muted" style="margin:4px 0 0;">Nothing left to prepare \u2014 all delivered. \u{1F389}</p>';
     body=filterBar(true)+`<div class="prep"><h3>&#127859; To prepare \u2014 ${prepDate} (${totalItems} item${totalItems!==1?'s':''})</h3>${prepBody}</div>`;
   }
