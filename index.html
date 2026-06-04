@@ -58,10 +58,10 @@
   .deliver{background:var(--ok-bg); color:var(--ok-fg); border-color:var(--ok-fg); font-weight:500;}
   .danger{background:var(--danger-bg); color:var(--danger-fg); border-color:var(--danger-fg); font-weight:500;}
   .card{background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius); padding:1rem 1.1rem; margin-bottom:1rem;}
-  .tabs{display:flex; gap:8px; padding-bottom:.5rem; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;}
+  .tabs{display:flex; gap:4px; margin:2px 0 .25rem; padding:4px; background:var(--surface-2); border-radius:999px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;}
   .tabs::-webkit-scrollbar{display:none;}
-  .tabs button{flex:0 0 auto; min-height:44px; padding:0 18px; white-space:nowrap; font-size:.92rem;}
-  .tabs button.active{background:var(--navy); color:#fff; border-color:var(--navy); font-weight:600;}
+  .tabs button{flex:1 0 auto; min-height:38px; padding:0 16px; white-space:nowrap; font-size:.9rem; font-weight:500; border:none; background:transparent; color:var(--text-2); border-radius:999px; transition:background .15s, color .15s;}
+  .tabs button.active{background:var(--navy); color:#fff; font-weight:600; box-shadow:0 2px 6px rgba(20,48,77,0.25);}
   .row{display:flex; align-items:center; gap:8px;}
   .stats{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:1rem 0;}
   .stat{background:var(--surface-2); border-radius:var(--radius-sm); padding:.75rem .6rem; text-align:center;}
@@ -97,7 +97,9 @@
   .org-card:active{transform:scale(.99);}
   .center{text-align:center;}
   .err{color:var(--danger-fg); font-size:.88rem; margin:8px 0 0;}
-  .topbar{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:.85rem;}
+  #btn-logout{text-decoration:none; color:var(--text-2); background:var(--surface-2); border:none; min-height:34px; padding:0 14px; border-radius:999px; font-size:.82rem; font-weight:500;}
+  #btn-logout:active{background:var(--border);}
   .back{background:none; border:none; color:var(--info-fg); font-size:.95rem; padding:0; min-height:auto; cursor:pointer;}
   .hide{display:none;}
   .prep{background:var(--accent-bg); border:0.5px solid var(--accent-bd); border-radius:var(--radius); padding:14px 16px; margin-bottom:1rem;}
