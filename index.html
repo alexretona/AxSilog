@@ -83,9 +83,9 @@
   .chip.active{background:var(--navy); color:#fff; border-color:var(--navy); font-weight:600;}
   .filter-lbl{font-size:.7rem; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:0.04em; margin:0 0 1px 2px;}
   .subtabs{display:flex; gap:4px; margin:0 0 1rem; background:var(--surface-2); padding:4px; border-radius:999px; width:100%; max-width:100%;}
-  .subtabs button{flex:1 1 0; min-width:0; min-height:42px; line-height:1.12; font-size:.8rem; font-weight:600; border:none; background:none; color:var(--text-2); border-radius:999px; padding:4px 2px; transition:background .18s,color .18s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .subtabs button{flex:1 1 0; min-width:0; min-height:44px; line-height:1.15; font-size:.8rem; font-weight:600; border:none; background:none; color:var(--text-2); border-radius:14px; padding:5px 4px; transition:background .18s,color .18s; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .subtabs button.active{background:var(--surface); color:var(--navy); font-weight:700; box-shadow:0 1px 3px rgba(20,48,77,0.16);}
-  .subtab-count{display:block; font-size:.7rem; opacity:.7; font-weight:600;}
+  .subtab-count{display:block; font-size:.72rem; opacity:.7; font-weight:700;}
   .order{background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius); padding:15px 16px; margin-bottom:12px; box-shadow:var(--shadow-ambient);}
   .muted{font-size:.82rem; color:var(--text-3); font-weight:500;}
   .pick{display:flex; align-items:center; gap:12px; background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:14px 15px; margin-bottom:10px; box-shadow:var(--shadow-ambient);}
@@ -521,16 +521,37 @@ async function viewOrganizerMenu(orgId){
   const {data:org}=await sb.from('profiles').select('*').eq('id',orgId).single();
   const {data:menus}=await sb.from('menus').select('*').eq('organizer_id',orgId).order('created_at',{ascending:false}).limit(1);
   const menu=menus&&menus[0];
-  // Pull this organizer's reviews (delivered + rated orders) for the rating summary.
-  const {data:revOrders}=await sb.from('orders').select('*').eq('organizer_id',orgId);
-  const reviews=(revOrders||[]).filter(o=>o.review_rating).sort((a,b)=>new Date(b.reviewed_at||b.created_at)-new Date(a.reviewed_at||a.created_at));
+  // Pull this organizer's reviews for the rating summary. Reviews live on the
+  // orders table, but other customers' orders may be hidden by row-level
+  // security on a public Browse page \u2014 so we first try a public-readable
+  // source ('public_reviews' view, then a 'reviews' table / RPC), and only
+  // fall back to the orders query (which returns just the viewer's own orders).
+  async function fetchReviews(){
+    // 1) public_reviews view (recommended): exposes only safe review columns
+    try{
+      const {data,error}=await sb.from('public_reviews').select('*').eq('organizer_id',orgId);
+      if(!error && data && data.length) return data;
+    }catch(e){}
+    // 2) reviews table, if one exists
+    try{
+      const {data,error}=await sb.from('reviews').select('*').eq('organizer_id',orgId);
+      if(!error && data && data.length) return data;
+    }catch(e){}
+    // 3) fall back to orders (works fully when RLS allows reading the org's reviewed orders)
+    const {data}=await sb.from('orders').select('*').eq('organizer_id',orgId);
+    return data||[];
+  }
+  const revOrders=await fetchReviews();
+  const reviews=(revOrders||[]).filter(o=>Number(o.review_rating)>0).sort((a,b)=>new Date(b.reviewed_at||b.created_at)-new Date(a.reviewed_at||a.created_at));
   const avgRating = reviews.length ? (reviews.reduce((s,o)=>s+Number(o.review_rating),0)/reviews.length) : 0;
   // Map each reviewed order -> its items, so a review can show what was ordered.
   const byOrderItems={};
   if(reviews.length){
-    const revIds=reviews.map(o=>o.id);
-    const {data:revItems}=await sb.from('order_items').select('*').in('order_id',revIds);
-    (revItems||[]).forEach(it=>{ (byOrderItems[it.order_id]=byOrderItems[it.order_id]||[]).push(it); });
+    const revIds=reviews.map(o=>o.id).filter(Boolean);
+    if(revIds.length){
+      const {data:revItems}=await sb.from('order_items').select('*').in('order_id',revIds);
+      (revItems||[]).forEach(it=>{ (byOrderItems[it.order_id]=byOrderItems[it.order_id]||[]).push(it); });
+    }
   }
   let html=`<button class="back" id="back-browse2">&#8249; Back to organizers</button><h2 style="margin-top:8px;">${esc(org.display_name)}</h2>`;
   // Rating summary + collapsible reviews (button keeps the list from blowing up the page).
@@ -920,8 +941,9 @@ function menuStatusCard(menu){
     btn=`<button id="m-toggle-open" class="small-btn" style="margin-top:10px;">Reopen menu</button>`;
   }
   return `<div class="card">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <span style="font-weight:500;">Current menu \u00B7 ${fmtDate(menu.menu_date)}</span>${pill}
+    <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
+      <span style="font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto;">Current menu \u00B7 ${fmtDate(menu.menu_date)}</span>
+      <span style="flex:0 0 auto;">${pill}</span>
     </div>
     <p class="muted" style="margin:6px 0 0;">${reason}</p>
     ${btn}
@@ -978,7 +1000,7 @@ async function loadOrgOrders(menu){
 
   // ----- sub-tab bar -----
   const reviewCount=orders.filter(o=>o.review_rating).length;
-  const subTabs=[['prepare','To prepare',active.length],['incoming','Incoming',active.length],['history','History',history.length],['analytics','Analytics',reviewCount]];
+  const subTabs=[['prepare','Prepare',active.length],['incoming','Incoming',active.length],['history','History',history.length],['analytics','Analytics',reviewCount]];
   if(!subTabs.some(t=>t[0]===orgSubTab)) orgSubTab='prepare';
   const subbar=`<div class="subtabs">`+subTabs.map(([k,l,n])=>
     `<button class="${k===orgSubTab?'active':''}" data-sub="${k}">${l}<br><span class="subtab-count">${n}</span></button>`).join('')+`</div>`;
