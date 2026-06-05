@@ -314,18 +314,6 @@ function fitOneLine(el, minScale=0.72){
 // Re-fit any one-line titles currently on screen (called after render & on resize)
 function refitTitles(){ document.querySelectorAll('.mc-title').forEach(el=>fitOneLine(el)); }
 window.addEventListener('resize', ()=>requestAnimationFrame(refitTitles));
-// TEMP DEBUG: dump raw review-related fields so we can see what the DB returns
-// for THIS organizer. Remove once the review-display issue is resolved.
-function debugReviewPanel(orders, history, reviewed){
-  const rows=(orders||[]).map(o=>{
-    return `id=${String(o.id).slice(0,8)} delivered=${o.delivered} rating=${JSON.stringify(o.review_rating)} (${typeof o.review_rating}) reviewed_at=${o.reviewed_at||'\u2014'} cust=${esc(o.customer_name||'\u2014')}`;
-  }).join('<br>');
-  const withRating=(orders||[]).filter(o=>o.review_rating!=null && o.review_rating!=='' );
-  return `<details class="card" style="background:#fff8e6; border-color:#f5a03c;"><summary style="cursor:pointer; font-weight:600; color:#9a5a06;">\u26a0\ufe0f Debug: review data (${orders.length} orders, ${history.length} delivered, ${reviewed.length} reviewed)</summary>
-    <p class="muted" style="margin:8px 0 4px;">Orders with a non-empty review_rating: <b>${withRating.length}</b></p>
-    <div style="font-family:monospace; font-size:.7rem; line-height:1.5; color:#4a5a72; word-break:break-all;">${rows||'(no orders returned)'}</div>
-  </details>`;
-}
 const esc = s => String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TEAMS = ['Accounting & Finance','Business Enablement','Central Management','Human Resources','Operations','Technology','Facilities, Clinic, Security','Others'];
 function teamSelectHtml(id, current){
@@ -561,17 +549,28 @@ async function viewOrganizerMenu(orgId){
   // source ('public_reviews' view, then a 'reviews' table / RPC), and only
   // fall back to the orders query (which returns just the viewer's own orders).
   async function fetchReviews(){
+    // Reviews are stored on the orders table, but row-level security usually
+    // hides other customers' orders from a customer/admin browsing this page.
+    // To show EVERY reviewed order to anyone, the app reads from a public,
+    // read-only source first and only falls back to direct orders as a
+    // last resort. Set one of these up in Supabase (see public_reviews SQL).
     // 1) public_reviews view (recommended): exposes only safe review columns
     try{
       const {data,error}=await sb.from('public_reviews').select('*').eq('organizer_id',orgId);
-      if(!error && data && data.length) return data;
+      if(!error && data) return data;
     }catch(e){}
     // 2) reviews table, if one exists
     try{
       const {data,error}=await sb.from('reviews').select('*').eq('organizer_id',orgId);
-      if(!error && data && data.length) return data;
+      if(!error && data) return data;
     }catch(e){}
-    // 3) fall back to orders (works fully when RLS allows reading the org's reviewed orders)
+    // 3) public RPC, if one exists (e.g. get_public_reviews(org uuid))
+    try{
+      const {data,error}=await sb.rpc('get_public_reviews',{org:orgId});
+      if(!error && data) return data;
+    }catch(e){}
+    // 4) last resort: direct orders read. Returns all reviewed orders only if
+    // RLS permits public read; otherwise just the viewer's own orders.
     const {data}=await sb.from('orders').select('*').eq('organizer_id',orgId);
     return data||[];
   }
@@ -1287,7 +1286,6 @@ async function loadOrgOrders(menu){
         <div class="stat"><p class="lbl">Avg rating</p><p class="val">${reviewed.length?avgAll.toFixed(1):'\u2014'}</p></div>
         <div class="stat"><p class="lbl">Reviews</p><p class="val">${reviewed.length}</p></div>
       </div>
-      ${debugReviewPanel(orders, history, reviewed)}
       <div class="card"><h3>&#127942; Top ordered items <span class="muted" style="font-weight:400; font-size:.8rem;">(all time, by quantity)</span></h3>${topBody}</div>
       ${reviewed.length?`<div class="card"><h3>&#11088; Rating breakdown</h3>${distBody}</div>`:''}
       <h3 style="margin-top:1.25rem;">&#128172; Feedback history</h3>${fbBody}`;
