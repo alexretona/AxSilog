@@ -170,6 +170,8 @@
   .review-give{margin-top:10px; padding:11px 13px; background:var(--surface-2); border-radius:var(--radius-sm);}
   .review-give textarea{width:100%; min-height:64px; padding:10px 12px; font-family:inherit; font-size:.95rem; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); resize:vertical; margin:8px 0;}
   .review-give textarea:focus{outline:none; box-shadow:0 0 0 3px var(--info-bg); border-color:var(--info-bd);}
+  .anon-check{display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none;}
+  .anon-check input[type=checkbox]{flex:none; width:1.35rem; height:1.35rem; margin:0; accent-color:var(--info-fg, #1a3a5c); cursor:pointer;}
   .rating-summary{display:flex; align-items:center; gap:10px; margin:0 0 12px;}
   .rating-big{font-size:2rem; font-weight:700; color:var(--text); line-height:1;}
   /* ----- analytics ----- */
@@ -681,8 +683,8 @@ async function viewMyOrders(){
             <button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button>
           </div>
           <textarea id="rt-${o.id}" placeholder="Add a comment about the food (optional)"></textarea>
-          <label style="display:flex; align-items:center; gap:7px; font-size:.82rem; color:var(--text-2); margin:2px 0 8px; cursor:pointer;">
-            <input type="checkbox" id="ra-${o.id}" style="width:auto; margin:0;"> Post anonymously
+          <label class="anon-check" style="font-size:.9rem; color:var(--text-2); margin:2px 0 10px;">
+            <input type="checkbox" id="ra-${o.id}"> Post anonymously
           </label>
           <button class="small-btn primary save-review" data-id="${o.id}">Submit review</button>
         </div>`;
@@ -736,8 +738,8 @@ async function editReview(orderId){
       <button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button>
     </div>
     <textarea id="edit-text" style="width:100%; min-height:70px; margin-top:10px; padding:10px 12px; font-family:inherit; font-size:.95rem; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);" placeholder="Comment (optional)">${esc(t)}</textarea>
-    <label style="display:flex; align-items:center; gap:7px; font-size:.86rem; color:var(--text-2); margin-top:10px; cursor:pointer;">
-      <input type="checkbox" id="edit-anon" ${anon?'checked':''} style="width:auto; margin:0;"> Post anonymously
+    <label class="anon-check" style="font-size:.9rem; color:var(--text-2); margin-top:12px;">
+      <input type="checkbox" id="edit-anon" ${anon?'checked':''}> Post anonymously
     </label>`;
   $('modal-input-wrap').classList.add('hide');
   $('modal-ok').textContent='Save'; $('modal-cancel').textContent='Cancel';
