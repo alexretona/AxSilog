@@ -292,6 +292,40 @@ let orgSubTab = 'prepare'; // prepare | incoming | history
 
 const $ = id => document.getElementById(id);
 const peso = n => '\u20B1'+Number(n||0).toLocaleString();
+// Shrink an inline element's font (via scale) until it fits beside its siblings
+// on a single line. Used so headers like "Current menu \u00B7 Sat, Jun 6" never
+// get clipped on narrow screens \u2014 the text scales down to fit instead.
+function fitOneLine(el, minScale=0.72){
+  if(!el) return;
+  const row=el.parentElement; if(!row) return;
+  el.style.transform='scale(1)';
+  // available width = row content width minus every sibling (pill, gaps)
+  const rowStyle=getComputedStyle(row);
+  const gap=parseFloat(rowStyle.columnGap||rowStyle.gap||'0')||0;
+  let used=0, sibs=0;
+  [...row.children].forEach(c=>{ if(c!==el){ used+=c.getBoundingClientRect().width; sibs++; } });
+  const avail = row.clientWidth - used - gap*sibs - 1;
+  const natural = el.scrollWidth;
+  if(natural>avail && natural>0){
+    const scale=Math.max(minScale, avail/natural);
+    el.style.transform='scale('+scale+')';
+  }
+}
+// Re-fit any one-line titles currently on screen (called after render & on resize)
+function refitTitles(){ document.querySelectorAll('.mc-title').forEach(el=>fitOneLine(el)); }
+window.addEventListener('resize', ()=>requestAnimationFrame(refitTitles));
+// TEMP DEBUG: dump raw review-related fields so we can see what the DB returns
+// for THIS organizer. Remove once the review-display issue is resolved.
+function debugReviewPanel(orders, history, reviewed){
+  const rows=(orders||[]).map(o=>{
+    return `id=${String(o.id).slice(0,8)} delivered=${o.delivered} rating=${JSON.stringify(o.review_rating)} (${typeof o.review_rating}) reviewed_at=${o.reviewed_at||'\u2014'} cust=${esc(o.customer_name||'\u2014')}`;
+  }).join('<br>');
+  const withRating=(orders||[]).filter(o=>o.review_rating!=null && o.review_rating!=='' );
+  return `<details class="card" style="background:#fff8e6; border-color:#f5a03c;"><summary style="cursor:pointer; font-weight:600; color:#9a5a06;">\u26a0\ufe0f Debug: review data (${orders.length} orders, ${history.length} delivered, ${reviewed.length} reviewed)</summary>
+    <p class="muted" style="margin:8px 0 4px;">Orders with a non-empty review_rating: <b>${withRating.length}</b></p>
+    <div style="font-family:monospace; font-size:.7rem; line-height:1.5; color:#4a5a72; word-break:break-all;">${rows||'(no orders returned)'}</div>
+  </details>`;
+}
 const esc = s => String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TEAMS = ['Accounting & Finance','Business Enablement','Central Management','Human Resources','Operations','Technology','Facilities, Clinic, Security','Others'];
 function teamSelectHtml(id, current){
@@ -900,6 +934,7 @@ async function viewOrganizer(){
     </div>
     <div id="org-orders"></div>`;
   v.innerHTML=html;
+  requestAnimationFrame(refitTitles);
   orgDraft=[];
   renderBuilder();
   $('f-add').onclick=()=>{const n=$('f-name'),p=$('f-price'); if(!n.value.trim())return; orgDraft.push({name:n.value.trim(),price:Number(p.value)||0}); n.value='';p.value='';renderBuilder();n.focus();};
@@ -941,8 +976,8 @@ function menuStatusCard(menu){
     btn=`<button id="m-toggle-open" class="small-btn" style="margin-top:10px;">Reopen menu</button>`;
   }
   return `<div class="card">
-    <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
-      <span style="font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto;">Current menu \u00B7 ${fmtDate(menu.menu_date)}</span>
+    <div class="row mc-head" style="justify-content:space-between; align-items:center; gap:8px;">
+      <span class="mc-title" style="font-weight:500; white-space:nowrap; min-width:0; flex:0 1 auto; transform-origin:left center; display:inline-block;">Current menu \u00B7 ${fmtDate(menu.menu_date)}</span>
       <span style="flex:0 0 auto;">${pill}</span>
     </div>
     <p class="muted" style="margin:6px 0 0;">${reason}</p>
@@ -1178,17 +1213,15 @@ async function loadOrgOrders(menu){
           : '';
         if(!o.paid){
           actions = o.proof_url
-            ? `<button class="small-btn undo" data-id="${o.id}">Undo delivered</button>
-               <a class="small-btn" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View proof</a>
+            ? `<a class="small-btn" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View proof</a>
                <button class="small-btn primary pd" data-id="${o.id}">Confirm payment</button>`
             : `<button class="small-btn undo" data-id="${o.id}">Undo delivered</button>
                ${proofGone || '<button class="small-btn" disabled>Pending payment</button>'}
                <button class="small-btn primary pd" data-id="${o.id}">Confirm payment</button>`;
         } else {
           actions = o.proof_url
-            ? `<button class="small-btn undo" data-id="${o.id}">Undo delivered</button>
-               <a class="small-btn deliver" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View proof</a>`
-            : `<button class="small-btn undo" data-id="${o.id}">Undo delivered</button>${proofGone}`;
+            ? `<a class="small-btn deliver" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View proof</a>`
+            : `${proofGone || '<span class="muted" style="font-size:.82rem;">Payment confirmed</span>'}`;
         }
         return `<div class="order" style="opacity:.92;">
           <div class="ohead"><span style="font-weight:500;">${esc(o.customer_name)}</span>${payPill}</div>
@@ -1254,6 +1287,7 @@ async function loadOrgOrders(menu){
         <div class="stat"><p class="lbl">Avg rating</p><p class="val">${reviewed.length?avgAll.toFixed(1):'\u2014'}</p></div>
         <div class="stat"><p class="lbl">Reviews</p><p class="val">${reviewed.length}</p></div>
       </div>
+      ${debugReviewPanel(orders, history, reviewed)}
       <div class="card"><h3>&#127942; Top ordered items <span class="muted" style="font-weight:400; font-size:.8rem;">(all time, by quantity)</span></h3>${topBody}</div>
       ${reviewed.length?`<div class="card"><h3>&#11088; Rating breakdown</h3>${distBody}</div>`:''}
       <h3 style="margin-top:1.25rem;">&#128172; Feedback history</h3>${fbBody}`;
