@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Axosilog">
+<meta name="apple-mobile-web-app-title" content="Axsilog">
 <meta name="theme-color" content="#1a3a5c">
 <meta name="color-scheme" content="light only">
-<title>Axosilog</title>
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' rx='40' fill='%231a3a5c'/%3E%3Cg stroke-linecap='round' stroke-width='16'%3E%3Cline x1='62' y1='66' x2='118' y2='114' stroke='%231a3a5c'/%3E%3Cline x1='62' y1='114' x2='90' y2='90' stroke='%23f5a03c'/%3E%3Cline x1='90' y1='90' x2='118' y2='66' stroke='%231a3a5c'/%3E%3C/g%3E%3Ctext x='90' y='150' font-family='Arial' font-size='30' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3EAxosilog%3C/text%3E%3C/svg%3E">
+<title>Axsilog</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' rx='40' fill='%231a3a5c'/%3E%3Cg stroke-linecap='round' stroke-width='16'%3E%3Cline x1='62' y1='66' x2='118' y2='114' stroke='%231a3a5c'/%3E%3Cline x1='62' y1='114' x2='90' y2='90' stroke='%23f5a03c'/%3E%3Cline x1='90' y1='90' x2='118' y2='66' stroke='%231a3a5c'/%3E%3C/g%3E%3Ctext x='90' y='150' font-family='Arial' font-size='30' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3EAxsilog%3C/text%3E%3C/svg%3E">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{ color-scheme: light;
@@ -88,6 +88,8 @@
   .qty-stepper .qval{min-width:36px; text-align:center; font-size:1.05rem; font-weight:600;}
   a{color:var(--info-fg);}
   .small-btn{min-height:42px; padding:0 14px; font-size:.88rem;}
+  a.small-btn{display:inline-flex; align-items:center; justify-content:center; min-height:42px; box-sizing:border-box;
+    border:0.5px solid var(--border-2); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); text-decoration:none;}
   .reset{background:none; border:none; color:var(--text-3); font-size:.82rem; cursor:pointer; padding:0; min-height:auto; text-decoration:underline;}
   .order-actions{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;} .order-actions button,.order-actions a{flex:1 1 auto; min-width:120px;} .order-actions a.small-btn{display:inline-flex; align-items:center; justify-content:center; min-height:42px; box-sizing:border-box;}
   .closed-banner{background:var(--danger-bg); color:var(--danger-fg); border-radius:var(--radius-sm); padding:12px 14px; font-size:.9rem; margin-bottom:1rem; text-align:center; font-weight:500;}
@@ -189,14 +191,14 @@
 <!-- ===== AUTH SCREEN ===== -->
 <div id="screen-auth" class="wrap" style="padding-top:3rem;">
   <div class="center" style="margin-bottom:1.5rem;">
-    <svg width="200" height="56" viewBox="0 0 200 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; margin:0 auto;">
+    <svg width="160" height="56" viewBox="0 0 160 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; margin:0 auto;">
       <text x="0" y="42" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">a</text>
       <g stroke-linecap="round" stroke-width="6">
         <line x1="30" y1="18" x2="58" y2="42" stroke="#1a3a5c"/>
         <line x1="30" y1="42" x2="44" y2="30" stroke="#f5a03c"/>
         <line x1="44" y1="30" x2="58" y2="18" stroke="#1a3a5c"/>
       </g>
-      <text x="62" y="42" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">osilog</text>
+      <text x="62" y="42" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">silog</text>
     </svg>
     <p class="muted" id="auth-sub">Sign in with your email to continue</p>
   </div>
@@ -235,14 +237,14 @@
 <div id="screen-app" class="hide">
   <header>
     <div class="topbar">
-      <svg width="118" height="33" viewBox="0 0 200 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+      <svg width="94" height="33" viewBox="0 0 160 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;">
         <text x="0" y="42" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">a</text>
         <g stroke-linecap="round" stroke-width="6">
           <line x1="30" y1="18" x2="58" y2="42" stroke="#1a3a5c"/>
           <line x1="30" y1="42" x2="44" y2="30" stroke="#f5a03c"/>
           <line x1="44" y1="30" x2="58" y2="18" stroke="#1a3a5c"/>
         </g>
-        <text x="62" y="42" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">osilog</text>
+        <text x="62" y="42" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">silog</text>
       </svg>
       <button class="reset" id="btn-logout">Log out</button>
     </div>
@@ -526,7 +528,7 @@ async function viewOrganizerMenu(orgId){
     const reviewList=reviews.map(o=>{
       const its=(byOrderItems[o.id]||[]).map(it=>esc(it.name)).join(', ');
       return `<div class="fb-item">
-        <div class="fb-head"><span style="font-weight:500;">${esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
+        <div class="fb-head"><span style="font-weight:500;">${o.review_anonymous?'Anonymous':esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
         ${its?`<p class="muted" style="margin:3px 0 0; font-size:.8rem;">${its}</p>`:''}
         ${o.review_text?`<p class="review-quote" style="margin-top:6px;">\u201C${esc(o.review_text)}\u201D</p>`:''}
       </div>`;
@@ -622,16 +624,35 @@ async function viewMyOrders(){
          <div class="qr-pane hide" id="qr-${o.id}" style="margin-top:8px;"><img src="${esc(qrUrl)}" alt="Payment QR" style="max-width:220px; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);"><p class="muted" style="font-size:.76rem; margin:6px 0 0;">Scan to pay, then upload your proof above.</p></div>`
       : `<p class="muted" style="font-size:.76rem; margin-top:8px;">Organizer hasn\u2019t set a payment QR \u2014 contact them to arrange payment.</p>`;
     if(o.delivered && !o.paid){
-      payblock=`<div style="margin-top:10px;">
-        <p style="font-size:.82rem; color:var(--warn-fg); margin:0 0 6px;">&#9203; Payment required \u2014 upload your proof:</p>
-        <input type="file" accept="image/*" class="proof-file" data-id="${o.id}" style="font-size:.88rem;">
-        ${qrBlock}
-      </div>`;
+      if(o.proof_url){
+        payblock=`<div style="margin-top:10px;">
+          <p style="font-size:.82rem; color:var(--text-2); margin:0 0 6px;">&#10003; Proof uploaded \u00B7 awaiting confirmation</p>
+          <div class="row" style="gap:8px; flex-wrap:wrap;">
+            <a class="small-btn" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View current proof</a>
+            <button class="small-btn reupload-proof" data-id="${o.id}">Reupload proof</button>
+          </div>
+          <input type="file" accept="image/*" class="proof-file hide" id="pf-${o.id}" data-id="${o.id}">
+          ${qrBlock}
+        </div>`;
+      } else {
+        payblock=`<div style="margin-top:10px;">
+          <p style="font-size:.82rem; color:var(--warn-fg); margin:0 0 6px;">&#9203; Payment required \u2014 upload your proof:</p>
+          <input type="file" accept="image/*" class="proof-file" data-id="${o.id}" style="font-size:.88rem;">
+          ${qrBlock}
+        </div>`;
+      }
     } else if(o.paid){
       const proofLink = o.proof_url ? ` \u00B7 <a href="${esc(o.proof_url)}" target="_blank">view proof</a>` : (o.proof_expired ? ` \u00B7 <span class="muted">proof expired</span>` : '');
       payblock=`<p style="font-size:.82rem; color:var(--ok-fg); margin:10px 0 0;">\u2713 Payment received${proofLink}</p>`;
     } else if(o.proof_url){
-      payblock=`<p style="font-size:.82rem; color:var(--text-2); margin:10px 0 0;">Proof uploaded \u00B7 <a href="${esc(o.proof_url)}" target="_blank">view</a> \u00B7 awaiting confirmation</p>`;
+      payblock=`<div style="margin-top:10px;">
+        <p style="font-size:.82rem; color:var(--text-2); margin:0 0 6px;">Proof uploaded \u00B7 awaiting confirmation</p>
+        <div class="row" style="gap:8px; flex-wrap:wrap;">
+          <a class="small-btn" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View current proof</a>
+          <button class="small-btn reupload-proof" data-id="${o.id}">Reupload proof</button>
+        </div>
+        <input type="file" accept="image/*" class="proof-file hide" id="pf-${o.id}" data-id="${o.id}">
+      </div>`;
     } else if(o.proof_expired){
       payblock=`<p style="font-size:.82rem; color:var(--text-3); margin:10px 0 0;">&#128465;&#65039; Proof file expired (kept 30 days) \u2014 upload again if still needed:</p>
         <input type="file" accept="image/*" class="proof-file" data-id="${o.id}" style="font-size:.88rem; margin-top:6px;">
@@ -650,6 +671,7 @@ async function viewMyOrders(){
             ${starsRO(o.review_rating)}
           </div>
           ${o.review_text?`<p class="review-quote">\u201C${esc(o.review_text)}\u201D</p>`:''}
+          ${o.review_anonymous?`<p class="muted" style="font-size:.78rem; margin:6px 0 0;">&#128274; Posted anonymously</p>`:''}
           <button class="reset edit-review" data-id="${o.id}" style="margin-top:8px;">Edit review</button>
         </div>`;
       } else {
@@ -659,6 +681,9 @@ async function viewMyOrders(){
             <button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button>
           </div>
           <textarea id="rt-${o.id}" placeholder="Add a comment about the food (optional)"></textarea>
+          <label style="display:flex; align-items:center; gap:7px; font-size:.82rem; color:var(--text-2); margin:2px 0 8px; cursor:pointer;">
+            <input type="checkbox" id="ra-${o.id}" style="width:auto; margin:0;"> Post anonymously
+          </label>
           <button class="small-btn primary save-review" data-id="${o.id}">Submit review</button>
         </div>`;
       }
@@ -674,6 +699,7 @@ async function viewMyOrders(){
     </div>`;
   }).join('');
   v.querySelectorAll('.proof-file').forEach(inp=>inp.onchange=e=>uploadProof(e.target.dataset.id, e.target.files[0]));
+  v.querySelectorAll('.reupload-proof').forEach(b=>b.onclick=()=>{ const inp=$('pf-'+b.dataset.id); if(inp) inp.click(); });
   v.querySelectorAll('.qr-toggle').forEach(b=>b.onclick=()=>{
     const pane=$('qr-'+b.dataset.id); const open=!pane.classList.contains('hide');
     pane.classList.toggle('hide'); b.innerHTML = (open?'\uD83D\uDCF1 View payment QR':'\uD83D\uDCF1 Hide payment QR');
@@ -689,25 +715,30 @@ async function saveReview(orderId){
   const ratingEl=$('rs-'+orderId);
   const rating=Number(ratingEl&&ratingEl.dataset.rating)||0;
   const text=($('rt-'+orderId)&&$('rt-'+orderId).value.trim())||'';
+  const anon=!!($('ra-'+orderId)&&$('ra-'+orderId).checked);
   if(!rating && !text){ alert('Add a star rating or a comment first.'); return; }
   if(!rating){ alert('Please tap a star rating (1\u20135) before submitting.'); return; }
   const {error}=await sb.from('orders').update({
-    review_rating:rating, review_text:text||null, reviewed_at:new Date().toISOString()
+    review_rating:rating, review_text:text||null, review_anonymous:anon, reviewed_at:new Date().toISOString()
   }).eq('id',orderId);
   if(error){ alert(error.message); return; }
   viewMyOrders();
 }
 // Re-open the review editor for an already-reviewed order.
 async function editReview(orderId){
-  const {data:o}=await sb.from('orders').select('review_rating,review_text').eq('id',orderId).single();
+  const {data:o}=await sb.from('orders').select('review_rating,review_text,review_anonymous').eq('id',orderId).single();
   const r=(o&&o.review_rating)||0, t=(o&&o.review_text)||'';
+  const anon=!!(o&&o.review_anonymous);
   const bd=$('modal-backdrop');
   $('modal-title').textContent='Edit your review';
   $('modal-body').innerHTML=`
     <div class="stars" data-rating="${r}" id="edit-stars">
       <button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button><button type="button">\u2605</button>
     </div>
-    <textarea id="edit-text" style="width:100%; min-height:70px; margin-top:10px; padding:10px 12px; font-family:inherit; font-size:.95rem; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);" placeholder="Comment (optional)">${esc(t)}</textarea>`;
+    <textarea id="edit-text" style="width:100%; min-height:70px; margin-top:10px; padding:10px 12px; font-family:inherit; font-size:.95rem; border:0.5px solid var(--border-2); border-radius:var(--radius-sm);" placeholder="Comment (optional)">${esc(t)}</textarea>
+    <label style="display:flex; align-items:center; gap:7px; font-size:.86rem; color:var(--text-2); margin-top:10px; cursor:pointer;">
+      <input type="checkbox" id="edit-anon" ${anon?'checked':''} style="width:auto; margin:0;"> Post anonymously
+    </label>`;
   $('modal-input-wrap').classList.add('hide');
   $('modal-ok').textContent='Save'; $('modal-cancel').textContent='Cancel';
   bd.classList.remove('hide');
@@ -718,9 +749,10 @@ async function editReview(orderId){
   $('modal-ok').onclick=async()=>{
     const rating=Number($('edit-stars').dataset.rating)||0;
     const text=$('edit-text').value.trim();
+    const anon=!!($('edit-anon')&&$('edit-anon').checked);
     if(!rating){ alert('Please tap a star rating (1\u20135).'); return; }
     close();
-    await sb.from('orders').update({review_rating:rating, review_text:text||null, reviewed_at:new Date().toISOString()}).eq('id',orderId);
+    await sb.from('orders').update({review_rating:rating, review_text:text||null, review_anonymous:anon, reviewed_at:new Date().toISOString()}).eq('id',orderId);
     viewMyOrders();
   };
 }
@@ -766,6 +798,9 @@ function compressImage(file, {maxDim=1200, quality=0.72}={}){
 
 async function uploadProof(orderId, file){
   if(!file) return;
+  // Note whether this order already had a proof (so messaging + cleanup differ).
+  const {data:prev}=await sb.from('orders').select('proof_path').eq('id',orderId).single();
+  const oldPath=prev&&prev.proof_path;
   // Compress before upload (always lands as .jpg once compressed).
   const compressed=await compressImage(file);
   const isJpeg = compressed!==file; // compressImage returns a JPEG blob on success
@@ -776,7 +811,9 @@ async function uploadProof(orderId, file){
   const {data:pub}=sb.storage.from('proofs').getPublicUrl(path);
   const {error}=await sb.from('orders').update({proof_url:pub.publicUrl, proof_path:path, proof_uploaded_at:new Date().toISOString()}).eq('id',orderId);
   if(error){ alert(error.message); return; }
-  alert('Proof uploaded! The organizer will confirm your payment.');
+  // Remove the previous file once the new one is safely linked (ignore failures).
+  if(oldPath && oldPath!==path){ try{ await sb.storage.from('proofs').remove([oldPath]); }catch(e){} }
+  alert(oldPath ? 'Proof replaced! The organizer will review your new proof.' : 'Proof uploaded! The organizer will confirm your payment.');
   viewMyOrders();
 }
 
