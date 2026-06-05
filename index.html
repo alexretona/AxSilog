@@ -414,6 +414,7 @@ function timeLabel(t){
 }
 function fmtDate(d){ if(!d) return 'Today'; const dt=new Date(d+'T00:00:00'); if(isNaN(dt)) return esc(d); return dt.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}); }
 function fmtDateTime(ts){ if(!ts) return ''; const dt=new Date(ts); if(isNaN(dt)) return ''; return dt.toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
+function fmtDateShort(ts){ if(!ts) return ''; const dt=new Date(ts); if(isNaN(dt)) return ''; return dt.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'}); }
 function dayKey(ts){ const dt=new Date(ts); if(isNaN(dt)) return ''; return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
 function dayLabel(key){ const dt=new Date(key+'T00:00:00'); if(isNaN(dt)) return key; const today=dayKey(Date.now()); const y=new Date(Date.now()-864e5); const yk=y.getFullYear()+'-'+String(y.getMonth()+1).padStart(2,'0')+'-'+String(y.getDate()).padStart(2,'0'); if(key===today) return 'Today'; if(key===yk) return 'Yesterday'; return dt.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}); }
 
@@ -659,12 +660,12 @@ async function viewOrganizerMenu(orgId){
       });
       list.innerHTML = rows.length ? rows.map(o=>{
         const its=(byOrderItems[o.id]||[]).map(it=>esc(it.name)).join(', ');
-        const when=fmtDateTime(o.reviewed_at||o.created_at);
+        const when=fmtDateShort(o.reviewed_at||o.created_at);
         return `<div class="fb-item">
-          <div class="fb-head"><span style="font-weight:500;">${o.review_anonymous?'Anonymous':esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
-          ${its?`<p class="muted" style="margin:3px 0 0; font-size:.8rem;">${its}</p>`:''}
-          ${o.review_text?`<p class="review-quote" style="margin-top:6px;">\u201C${esc(o.review_text)}\u201D</p>`:''}
-          ${when?`<p class="muted" style="margin:6px 0 0; font-size:.74rem;">&#128197; ${when}</p>`:''}
+          <div class="fb-head"><span style="font-weight:500; font-size:.78rem; color:var(--text-2);">${o.review_anonymous?'Anonymous':esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
+          ${its?`<p style="margin:4px 0 0; font-size:.84rem; font-weight:600; color:var(--text);">${its}</p>`:''}
+          ${o.review_text?`<p class="review-quote" style="margin-top:5px;">\u201C${esc(o.review_text)}\u201D</p>`:''}
+          ${when?`<span class="muted" style="display:inline-block; margin:7px 0 0; font-size:.68rem; opacity:.75;">${when}</span>`:''}
         </div>`;
       }).join('') : '<p class="muted" style="font-size:.85rem;">No reviews match this filter.</p>';
     };
@@ -1332,10 +1333,10 @@ async function loadOrgOrders(menu){
     const fbBody = reviewed.length
       ? (fbRows.length
           ? fbRows.map(o=>`<div class="fb-item">
-              <div class="fb-head"><span style="font-weight:500;">${esc(o.customer_name)}</span>${starsRO(o.review_rating)}</div>
-              <p class="muted" style="margin:2px 0 0; font-size:.74rem;">&#128197; ${fmtDateTime(o.reviewed_at||o.created_at)}</p>
-              <div class="oitems" style="margin:8px 0 0;">${itemLinesHtml(byOrder[o.id])}</div>
-              ${o.review_text?`<p class="review-quote" style="margin-top:8px;">\u201C${esc(o.review_text)}\u201D</p>`:'<p class="muted" style="margin-top:6px; font-size:.8rem;">No comment left.</p>'}
+              <div class="fb-head"><span style="font-weight:500; font-size:.78rem; color:var(--text-2);">${esc(o.customer_name)}</span>${starsRO(o.review_rating)}</div>
+              <div class="oitems" style="margin:6px 0 0;">${itemLinesHtml(byOrder[o.id])}</div>
+              ${o.review_text?`<p class="review-quote" style="margin-top:7px;">\u201C${esc(o.review_text)}\u201D</p>`:'<p class="muted" style="margin-top:6px; font-size:.8rem;">No comment left.</p>'}
+              <span class="muted" style="display:inline-block; margin:7px 0 0; font-size:.68rem; opacity:.75;">${fmtDateShort(o.reviewed_at||o.created_at)}</span>
             </div>`).join('')
           : '<p class="muted" style="font-size:.85rem;">No reviews match this filter.</p>')
       : '<p class="muted">No feedback yet. Reviews customers leave will show up here.</p>';
