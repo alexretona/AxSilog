@@ -289,6 +289,7 @@ let activeTab = '';
 let viewingOrganizer = null; // when a customer opens an organizer's menu
 let orgFilter = { date:'all', status:'all', team:'all' }; // "My menu" incoming-orders filters
 let orgSubTab = 'prepare'; // prepare | incoming | history
+let orgRevFilter = { food:'', dir:'desc' }; // Analytics feedback: food filter + sort direction
 
 const $ = id => document.getElementById(id);
 const peso = n => '\u20B1'+Number(n||0).toLocaleString();
@@ -588,15 +589,14 @@ async function viewOrganizerMenu(orgId){
   }
   let html=`<button class="back" id="back-browse2">&#8249; Back to organizers</button><h2 style="margin-top:8px;">${esc(org.display_name)}</h2>`;
   // Rating summary + collapsible reviews (button keeps the list from blowing up the page).
+  // Reviews can be filtered by the food item ordered and sorted by date.
   if(reviews.length){
-    const reviewList=reviews.map(o=>{
-      const its=(byOrderItems[o.id]||[]).map(it=>esc(it.name)).join(', ');
-      return `<div class="fb-item">
-        <div class="fb-head"><span style="font-weight:500;">${o.review_anonymous?'Anonymous':esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
-        ${its?`<p class="muted" style="margin:3px 0 0; font-size:.8rem;">${its}</p>`:''}
-        ${o.review_text?`<p class="review-quote" style="margin-top:6px;">\u201C${esc(o.review_text)}\u201D</p>`:''}
-      </div>`;
-    }).join('');
+    // Unique list of foods that appear in reviewed orders, for the filter menu.
+    const foodSet=new Set();
+    reviews.forEach(o=>(byOrderItems[o.id]||[]).forEach(it=>foodSet.add(it.name)));
+    const foods=[...foodSet].sort((a,b)=>a.localeCompare(b));
+    const foodOpts=['<option value="">All food</option>']
+      .concat(foods.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`)).join('');
     html+=`<div class="card" style="margin-bottom:10px;">
       <div class="row" style="justify-content:space-between; align-items:center;">
         <div class="row" style="gap:8px; align-items:center;">
@@ -606,7 +606,13 @@ async function viewOrganizerMenu(orgId){
         </div>
         <button class="reset" id="rev-toggle" style="font-weight:500; color:var(--info-fg);">See reviews</button>
       </div>
-      <div id="rev-list" class="hide" style="margin-top:12px;">${reviewList}</div>
+      <div id="rev-panel" class="hide" style="margin-top:12px;">
+        <div class="row" style="gap:8px; margin-bottom:10px;">
+          <select id="rev-food" style="height:2.4rem; flex:1; font-size:.85rem;">${foodOpts}</select>
+          <button class="reset" id="rev-sort" data-dir="desc" style="height:2.4rem; flex:0 0 auto; padding:0 12px; font-size:.82rem; font-weight:600; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); white-space:nowrap;">Newest &#8595;</button>
+        </div>
+        <div id="rev-list"></div>
+      </div>
     </div>`;
   } else {
     html+=`<p class="muted" style="margin:0 0 10px;">No reviews yet.</p>`;
@@ -638,10 +644,43 @@ async function viewOrganizerMenu(orgId){
   v.innerHTML=html;
   (document.getElementById('back-browse2')||{}).onclick=()=>{viewingOrganizer=null; viewBrowse(); scrollTo(0,0);};
   const revToggle=$('rev-toggle');
-  if(revToggle) revToggle.onclick=()=>{
-    const list=$('rev-list'); const open=!list.classList.contains('hide');
-    list.classList.toggle('hide'); revToggle.textContent = open ? 'See reviews' : 'Hide reviews';
-  };
+  if(revToggle){
+    // Render the review list applying the current food filter + sort direction.
+    const renderReviews=()=>{
+      const list=$('rev-list'); if(!list) return;
+      const food=($('rev-food')||{}).value||'';
+      const sortEl=$('rev-sort');
+      const dir=(sortEl&&sortEl.dataset.dir)||'desc';
+      let rows=reviews.slice();
+      if(food) rows=rows.filter(o=>(byOrderItems[o.id]||[]).some(it=>it.name===food));
+      rows.sort((a,b)=>{
+        const ta=new Date(a.reviewed_at||a.created_at), tb=new Date(b.reviewed_at||b.created_at);
+        return dir==='asc'? ta-tb : tb-ta;
+      });
+      list.innerHTML = rows.length ? rows.map(o=>{
+        const its=(byOrderItems[o.id]||[]).map(it=>esc(it.name)).join(', ');
+        const when=fmtDateTime(o.reviewed_at||o.created_at);
+        return `<div class="fb-item">
+          <div class="fb-head"><span style="font-weight:500;">${o.review_anonymous?'Anonymous':esc(o.customer_name||'Customer')}</span>${starsRO(o.review_rating)}</div>
+          ${its?`<p class="muted" style="margin:3px 0 0; font-size:.8rem;">${its}</p>`:''}
+          ${o.review_text?`<p class="review-quote" style="margin-top:6px;">\u201C${esc(o.review_text)}\u201D</p>`:''}
+          ${when?`<p class="muted" style="margin:6px 0 0; font-size:.74rem;">&#128197; ${when}</p>`:''}
+        </div>`;
+      }).join('') : '<p class="muted" style="font-size:.85rem;">No reviews match this filter.</p>';
+    };
+    revToggle.onclick=()=>{
+      const panel=$('rev-panel'); const open=!panel.classList.contains('hide');
+      panel.classList.toggle('hide'); revToggle.textContent = open ? 'See reviews' : 'Hide reviews';
+      if(!open) renderReviews();
+    };
+    const foodSel=$('rev-food'); if(foodSel) foodSel.onchange=renderReviews;
+    const sortBtn=$('rev-sort'); if(sortBtn) sortBtn.onclick=()=>{
+      const next = sortBtn.dataset.dir==='desc' ? 'asc' : 'desc';
+      sortBtn.dataset.dir=next;
+      sortBtn.innerHTML = next==='desc' ? 'Newest \u2193' : 'Oldest \u2191';
+      renderReviews();
+    };
+  }
   if(!closed){
     const qty=(items||[]).map(()=>0);
     const recalc=()=>{ const t=items.reduce((s,it,i)=>s+Number(it.price)*qty[i],0); $('ct').textContent=peso(t); };
@@ -948,6 +987,7 @@ async function viewOrganizer(){
   };
   orgFilter={ date:'all', status:'all', team:'all' };
   orgSubTab='prepare';
+  orgRevFilter={ food:'', dir:'desc' };
   loadOrgOrders(menu);
 }
 
@@ -1271,13 +1311,33 @@ async function loadOrgOrders(menu){
         }).join('')
       : '';
 
+    // Feedback list: filter by food ordered + sort by review date (orgRevFilter).
+    const revFoodSet=new Set();
+    reviewed.forEach(o=>(byOrder[o.id]||[]).forEach(it=>revFoodSet.add(it.name)));
+    const revFoods=[...revFoodSet].sort((a,b)=>a.localeCompare(b));
+    let fbRows=reviewed.slice();
+    if(orgRevFilter.food) fbRows=fbRows.filter(o=>(byOrder[o.id]||[]).some(it=>it.name===orgRevFilter.food));
+    fbRows.sort((a,b)=>{
+      const ta=new Date(a.reviewed_at||a.created_at), tb=new Date(b.reviewed_at||b.created_at);
+      return orgRevFilter.dir==='asc'? ta-tb : tb-ta;
+    });
+    const fbControls = reviewed.length
+      ? `<div class="row" style="gap:8px; margin:6px 0 12px;">
+          <select id="orev-food" style="height:2.4rem; flex:1; font-size:.85rem;">
+            ${['<option value="">All food</option>'].concat(revFoods.map(f=>`<option value="${esc(f)}"${f===orgRevFilter.food?' selected':''}>${esc(f)}</option>`)).join('')}
+          </select>
+          <button class="reset" id="orev-sort" style="height:2.4rem; flex:0 0 auto; padding:0 12px; font-size:.82rem; font-weight:600; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); white-space:nowrap;">${orgRevFilter.dir==='desc'?'Newest \u2193':'Oldest \u2191'}</button>
+        </div>`
+      : '';
     const fbBody = reviewed.length
-      ? reviewed.map(o=>`<div class="fb-item">
-          <div class="fb-head"><span style="font-weight:500;">${esc(o.customer_name)}</span>${starsRO(o.review_rating)}</div>
-          <p class="muted" style="margin:2px 0 0;">${fmtDateTime(o.reviewed_at||o.created_at)}</p>
-          <div class="oitems" style="margin:8px 0 0;">${itemLinesHtml(byOrder[o.id])}</div>
-          ${o.review_text?`<p class="review-quote" style="margin-top:8px;">\u201C${esc(o.review_text)}\u201D</p>`:'<p class="muted" style="margin-top:6px; font-size:.8rem;">No comment left.</p>'}
-        </div>`).join('')
+      ? (fbRows.length
+          ? fbRows.map(o=>`<div class="fb-item">
+              <div class="fb-head"><span style="font-weight:500;">${esc(o.customer_name)}</span>${starsRO(o.review_rating)}</div>
+              <p class="muted" style="margin:2px 0 0; font-size:.74rem;">&#128197; ${fmtDateTime(o.reviewed_at||o.created_at)}</p>
+              <div class="oitems" style="margin:8px 0 0;">${itemLinesHtml(byOrder[o.id])}</div>
+              ${o.review_text?`<p class="review-quote" style="margin-top:8px;">\u201C${esc(o.review_text)}\u201D</p>`:'<p class="muted" style="margin-top:6px; font-size:.8rem;">No comment left.</p>'}
+            </div>`).join('')
+          : '<p class="muted" style="font-size:.85rem;">No reviews match this filter.</p>')
       : '<p class="muted">No feedback yet. Reviews customers leave will show up here.</p>';
 
     body=`<h3>&#128202; Analytics</h3>
@@ -1288,12 +1348,16 @@ async function loadOrgOrders(menu){
       </div>
       <div class="card"><h3>&#127942; Top ordered items <span class="muted" style="font-weight:400; font-size:.8rem;">(all time, by quantity)</span></h3>${topBody}</div>
       ${reviewed.length?`<div class="card"><h3>&#11088; Rating breakdown</h3>${distBody}</div>`:''}
-      <h3 style="margin-top:1.25rem;">&#128172; Feedback history</h3>${fbBody}`;
+      <h3 style="margin-top:1.25rem;">&#128172; Feedback history</h3>${fbControls}${fbBody}`;
   }
 
   el.innerHTML=subbar+body;
   el.querySelectorAll('.subtabs button').forEach(b=>b.onclick=()=>{ orgSubTab=b.dataset.sub; loadOrgOrders(menu); });
   el.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{ orgFilter[b.dataset.f]=b.dataset.v; loadOrgOrders(menu); });
+  const orevFood=el.querySelector('#orev-food');
+  if(orevFood) orevFood.onchange=()=>{ orgRevFilter.food=orevFood.value; loadOrgOrders(menu); };
+  const orevSort=el.querySelector('#orev-sort');
+  if(orevSort) orevSort.onclick=()=>{ orgRevFilter.dir = orgRevFilter.dir==='desc'?'asc':'desc'; loadOrgOrders(menu); };
   el.querySelectorAll('.cf').forEach(b=>b.onclick=async()=>{await sb.from('orders').update({status:'confirmed'}).eq('id',b.dataset.id); loadOrgOrders(menu);});
   el.querySelectorAll('.unc').forEach(b=>b.onclick=async()=>{await sb.from('orders').update({status:'new'}).eq('id',b.dataset.id); loadOrgOrders(menu);});
   el.querySelectorAll('.dv').forEach(b=>b.onclick=()=>singleDeliver(b.dataset.id, menu));
