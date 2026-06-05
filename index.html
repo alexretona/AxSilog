@@ -289,6 +289,7 @@ let activeTab = '';
 let viewingOrganizer = null; // when a customer opens an organizer's menu
 let orgFilter = { date:'all', status:'all', team:'all' }; // "My menu" incoming-orders filters
 let orgSubTab = 'prepare'; // prepare | incoming | history
+let myOrdersTab = 'active'; // customer "My orders" filter: active | completed
 let orgRevFilter = { food:'', dir:'desc' }; // Analytics feedback: food filter + sort direction
 
 const $ = id => document.getElementById(id);
@@ -736,7 +737,18 @@ async function viewMyOrders(){
   const orgIds=[...new Set(orders.map(o=>o.organizer_id))];
   const {data:orgs}=await sb.from('profiles').select('id,display_name,payment_qr_url').in('id',orgIds);
   const orgName={}; const orgQR={}; (orgs||[]).forEach(o=>{orgName[o.id]=o.display_name; orgQR[o.id]=o.payment_qr_url;});
-  v.innerHTML='<h2>My orders</h2>'+orders.map(o=>{
+  // Active = not yet paid (placed / pending payment). Completed = paid.
+  const activeOrders=orders.filter(o=>!o.paid);
+  const completedOrders=orders.filter(o=>o.paid);
+  const shown = myOrdersTab==='completed' ? completedOrders : activeOrders;
+  const subbar=`<div class="subtabs" style="margin-bottom:1rem;">
+    <button data-mo="active" class="${myOrdersTab==='active'?'active':''}">Active<span class="subtab-count">${activeOrders.length}</span></button>
+    <button data-mo="completed" class="${myOrdersTab==='completed'?'active':''}">Completed<span class="subtab-count">${completedOrders.length}</span></button>
+  </div>`;
+  const emptyMsg = myOrdersTab==='completed'
+    ? '<p class="muted">No completed orders yet. Orders move here once payment is confirmed.</p>'
+    : '<p class="muted">No active orders. Browse organizers to place one.</p>';
+  v.innerHTML='<h2>My orders</h2>'+subbar+(shown.length?shown.map(o=>{
     const statusPill = o.delivered?'<span class="pill p-delivered">Delivered \u2713</span>':(o.status==='confirmed'?'<span class="pill p-conf">Confirmed</span>':'<span class="pill p-new">New</span>');
     const itemLines=itemLinesHtml(byOrder[o.id])+deliveryLineHtml(o.delivery_fee);
     let payblock='';
@@ -819,7 +831,8 @@ async function viewMyOrders(){
       ${reviewblock}
       ${canCancel?`<div class="order-actions"><button class="small-btn danger cancel" data-id="${o.id}">Cancel order</button></div>`:''}
     </div>`;
-  }).join('');
+  }).join(''):emptyMsg);
+  v.querySelectorAll('.subtabs button[data-mo]').forEach(b=>b.onclick=()=>{ myOrdersTab=b.dataset.mo; viewMyOrders(); });
   v.querySelectorAll('.proof-file').forEach(inp=>inp.onchange=e=>uploadProof(e.target.dataset.id, e.target.files[0]));
   v.querySelectorAll('.reupload-proof').forEach(b=>b.onclick=()=>{ const inp=$('pf-'+b.dataset.id); if(inp) inp.click(); });
   v.querySelectorAll('.qr-toggle').forEach(b=>b.onclick=()=>{
