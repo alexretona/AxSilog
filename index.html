@@ -82,6 +82,7 @@
   .chip{flex:0 0 auto; min-height:38px; padding:0 14px; font-size:.78rem; font-weight:600; border:0.5px solid var(--border-2); border-radius:999px; background:var(--surface); color:var(--text-2); cursor:pointer; white-space:nowrap; transition:background .15s,color .15s,border-color .15s;}
   .chip.active{background:var(--navy); color:#fff; border-color:var(--navy); font-weight:600;}
   .filter-lbl{font-size:.7rem; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:0.04em; margin:0 0 1px 2px;}
+  .date-select{width:100%; max-width:240px; height:2.6rem; font-size:.9rem; font-weight:500;}
   .subtabs{display:flex; gap:4px; margin:0 0 1rem; background:var(--surface-2); padding:4px; border-radius:999px; width:100%; max-width:100%;}
   .subtabs button{flex:1 1 0; min-width:0; min-height:44px; line-height:1.15; font-size:.8rem; font-weight:600; border:none; background:none; color:var(--text-2); border-radius:14px; padding:5px 4px; transition:background .18s,color .18s; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .subtabs button.active{background:var(--surface); color:var(--navy); font-weight:700; box-shadow:0 1px 3px rgba(20,48,77,0.16);}
@@ -1208,9 +1209,15 @@ async function loadOrgOrders(menu){
   const subbar=`<div class="subtabs">`+subTabs.map(([k,l,n])=>
     `<button class="${k===orgSubTab?'active':''}" data-sub="${k}">${l}<br><span class="subtab-count">${n}</span></button>`).join('')+`</div>`;
 
-  // shared filters over ACTIVE orders
-  const dateKeys=[...new Set(active.map(o=>dayKey(o.created_at)))].sort().reverse();
-  if(orgFilter.date!=='all' && !dateKeys.includes(orgFilter.date)) orgFilter.date='all';
+  // Date keys differ per sub-tab: Prepare/Incoming filter ACTIVE orders, while
+  // History filters DELIVERED orders. Validating the selected date against the
+  // wrong set was snapping the History filter back to "all" on every re-render
+  // (active orders can be empty), so the Yesterday / dated chips never stuck.
+  const activeDateKeys=[...new Set(active.map(o=>dayKey(o.created_at)))].sort().reverse();
+  const histDateKeys=[...new Set(history.map(o=>dayKey(o.created_at)))].sort().reverse();
+  const validDateKeys = orgSubTab==='history' ? histDateKeys : activeDateKeys;
+  if(orgFilter.date!=='all' && !validDateKeys.includes(orgFilter.date)) orgFilter.date='all';
+  const dateKeys=activeDateKeys;
   const matchStatus=o=>{
     switch(orgFilter.status){
       case 'new': return o.status!=='confirmed';
@@ -1227,9 +1234,10 @@ async function loadOrgOrders(menu){
   const shown=active.filter(o=>matchDate(o)&&matchStatus(o)&&matchTeam(o));
 
   function filterBar(showStatus){
-    const dateChips=`<button class="chip ${orgFilter.date==='all'?'active':''}" data-f="date" data-v="all">All dates</button>`+
-      dateKeys.map(k=>`<button class="chip ${orgFilter.date===k?'active':''}" data-f="date" data-v="${k}">${dayLabel(k)}</button>`).join('');
-    let h=`<div class="filters"><div><p class="filter-lbl">Filter by date</p><div class="filter-grp">${dateChips}</div></div>`;
+    const dateOpts=`<option value="all"${orgFilter.date==='all'?' selected':''}>All dates</option>`+
+      dateKeys.map(k=>`<option value="${k}"${orgFilter.date===k?' selected':''}>${dayLabel(k)}</option>`).join('');
+    const dateSelect=`<select class="date-select" data-f="date">${dateOpts}</select>`;
+    let h=`<div class="filters"><div><p class="filter-lbl">Filter by date</p>${dateSelect}</div>`;
     if(teamKeys.length>1){
       const teamChips=`<button class="chip ${orgFilter.team==='all'?'active':''}" data-f="team" data-v="all">All teams</button>`+
         teamKeys.map(t=>`<button class="chip ${orgFilter.team===t?'active':''}" data-f="team" data-v="${esc(t)}">${esc(t)}</button>`).join('');
@@ -1352,11 +1360,10 @@ async function loadOrgOrders(menu){
     if(!history.length){
       body=`<h3>&#128221; Order history</h3><p class="muted">No delivered orders yet.</p>`;
     } else {
-      const histDateKeys=[...new Set(history.map(o=>dayKey(o.created_at)))].sort().reverse();
       const hShown=history.filter(o=> orgFilter.date==='all' || dayKey(o.created_at)===orgFilter.date);
-      const histChips=`<button class="chip ${orgFilter.date==='all'?'active':''}" data-f="date" data-v="all">All dates</button>`+
-        histDateKeys.map(k=>`<button class="chip ${orgFilter.date===k?'active':''}" data-f="date" data-v="${k}">${dayLabel(k)}</button>`).join('');
-      const histFilter=`<div class="filters"><div><p class="filter-lbl">Filter by date</p><div class="filter-grp">${histChips}</div></div></div>`;
+      const histOpts=`<option value="all"${orgFilter.date==='all'?' selected':''}>All dates</option>`+
+        histDateKeys.map(k=>`<option value="${k}"${orgFilter.date===k?' selected':''}>${dayLabel(k)}</option>`).join('');
+      const histFilter=`<div class="filters"><div><p class="filter-lbl">Filter by date</p><select class="date-select" data-f="date">${histOpts}</select></div></div>`;
       const histRevenue=hShown.reduce((s,o)=>s+Number(o.total),0);
       const rated=hShown.filter(o=>o.review_rating);
       const avgRating = rated.length ? (rated.reduce((s,o)=>s+Number(o.review_rating),0)/rated.length) : 0;
@@ -1483,6 +1490,7 @@ async function loadOrgOrders(menu){
   el.innerHTML=subbar+body;
   el.querySelectorAll('.subtabs button').forEach(b=>b.onclick=()=>{ orgSubTab=b.dataset.sub; loadOrgOrders(menu); });
   el.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{ orgFilter[b.dataset.f]=b.dataset.v; loadOrgOrders(menu); });
+  el.querySelectorAll('.date-select').forEach(s=>s.onchange=()=>{ orgFilter[s.dataset.f]=s.value; loadOrgOrders(menu); });
   const orevFood=el.querySelector('#orev-food');
   if(orevFood) orevFood.onchange=()=>{ orgRevFilter.food=orevFood.value; loadOrgOrders(menu); };
   const orevSort=el.querySelector('#orev-sort');
