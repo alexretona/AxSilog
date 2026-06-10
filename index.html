@@ -500,7 +500,7 @@ function buildTabs(){
   tabs.push(['account','Account']);
   activeTab = tabs.some(t=>t[0]===activeTab)?activeTab:'browse';
   $('tabs').innerHTML = tabs.map(([k,l])=>`<button data-k="${k}" class="${k===activeTab?'active':''}">${l}</button>`).join('');
-  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeTab=b.dataset.k; viewingOrganizer=null; orgEditMenuId=null; buildTabs(); scrollTo(0,0);});
+  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeTab=b.dataset.k; viewingOrganizer=null; orgCardEditing=false; buildTabs(); scrollTo(0,0);});
   routes[activeTab]();
 }
 
@@ -971,36 +971,30 @@ async function uploadQR(file){
 
 // ---------- ORGANIZER (post menu + manage orders) ----------
 let orgDraft=[];
-let orgEditMenuId=null; // id of the menu currently being edited in place (null = posting new)
+let orgCardEditing=false; // true when the Current menu card is expanded into edit mode
+let cardDraft=[];         // working copy of the current menu's items while editing the card
 async function viewOrganizer(){
   const v=$('view');
   const {data:menus}=await sb.from('menus').select('*').eq('organizer_id',me.id).order('created_at',{ascending:false}).limit(1);
   const menu=menus&&menus[0];
-  // If a menu exists we start in "edit" mode: the form is pre-filled with that
-  // menu's items so the organizer can change food names, prices, add or remove
-  // items, then save in place. "Start a new menu" clears the form for a fresh post.
-  const editing = !!menu && orgEditMenuId===menu.id;
-  let html=`<h2>${editing?'Edit today\u2019s menu':'Post today\u2019s menu'}</h2>
+  let html=`<h2>Post today\u2019s menu</h2>
     <div class="card">
       <label class="fld">Menu date</label>
-      <input type="date" id="m-date" style="margin-bottom:10px;" value="${editing?esc(menu.menu_date||''):new Date().toISOString().slice(0,10)}">
+      <input type="date" id="m-date" style="margin-bottom:10px;" value="${menu?esc(menu.menu_date||''):new Date().toISOString().slice(0,10)}">
       <div class="toggle-row">
         <label class="fld" style="margin:0;">Set an order cutoff time?</label>
-        <label class="switch"><input type="checkbox" id="m-cutoff-on" ${editing&&menu.cutoff_time?'checked':''}><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" id="m-cutoff-on" ${menu&&menu.cutoff_time?'checked':''}><span class="slider"></span></label>
       </div>
-      <input type="time" id="m-cutoff" style="margin-bottom:10px;${editing&&menu.cutoff_time?'':'display:none;'}" value="${editing?esc(menu.cutoff_time||''):''}">
+      <input type="time" id="m-cutoff" style="margin-bottom:10px;${menu&&menu.cutoff_time?'':'display:none;'}" value="${menu?esc(menu.cutoff_time||''):''}">
       <div id="builder"></div>
       <input type="text" id="f-name" placeholder="Food name" style="margin-top:8px;">
       <div class="row" style="margin-top:8px;">
         <input type="number" id="f-price" placeholder="&#8369; price" inputmode="numeric" style="flex:1;">
         <button id="f-add" style="flex-shrink:0;">+ Add</button>
       </div>
-      ${editing
-        ? `<button id="m-save" class="primary" style="width:100%; margin-top:12px;">Save changes</button>
-           <button id="m-new" class="small-btn" style="width:100%; margin-top:8px;">Start a new menu instead</button>`
-        : `<button id="m-publish" class="primary" style="width:100%; margin-top:12px;">Publish new menu</button>
-           ${menu?`<button id="m-edit" class="small-btn" style="width:100%; margin-top:8px;">Edit current menu instead</button>`:''}`}
+      <button id="m-publish" class="primary" style="width:100%; margin-top:12px;">Publish new menu</button>
     </div>
+    ${menu?menuStatusCard(menu):''}
     ${menu?menuStatusCard(menu):''}
     <div class="card">
       <div class="row" style="justify-content:space-between; align-items:center;">
@@ -1015,26 +1009,12 @@ async function viewOrganizer(){
   v.innerHTML=html;
   requestAnimationFrame(refitTitles);
   orgDraft=[];
-  // In edit mode, pre-fill the builder with the current menu's saved items.
-  // Each item keeps its DB id so saving can tell updates from new inserts.
-  if(editing){
-    const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id).order('id',{ascending:true});
-    orgDraft=(items||[]).map(it=>({id:it.id, name:it.name, price:Number(it.price)}));
-  }
   renderBuilder();
   $('f-add').onclick=()=>{const n=$('f-name'),p=$('f-price'); if(!n.value.trim())return; orgDraft.push({name:n.value.trim(),price:Number(p.value)||0}); n.value='';p.value='';renderBuilder();n.focus();};
   $('m-cutoff-on').onchange=e=>{ $('m-cutoff').style.display=e.target.checked?'block':'none'; };
-  if($('m-publish')) $('m-publish').onclick=publishMenu;
-  if($('m-save')) $('m-save').onclick=()=>saveMenuEdits(menu);
-  // Switch into edit mode for the existing menu.
-  if($('m-edit')) $('m-edit').onclick=()=>{ orgEditMenuId=menu.id; viewOrganizer(); scrollTo(0,0); };
-  // Leave edit mode and start a fresh menu post.
-  if($('m-new')) $('m-new').onclick=async()=>{
-    const ok=await uiConfirm('Start a new menu?', 'This leaves the current menu as-is and clears the form so you can post a new one.');
-    if(!ok) return;
-    orgEditMenuId=null; viewOrganizer(); scrollTo(0,0);
-  };
+  $('m-publish').onclick=publishMenu;
   const tg=$('m-toggle-open'); if(tg) tg.onclick=()=>toggleMenuOpen(menu);
+  wireMenuCardEdit(menu);
   const qrIn=$('org-qr');
   if(qrIn) qrIn.onchange=async e=>{
     const f=e.target.files[0]; if(!f) return;
@@ -1049,6 +1029,23 @@ async function viewOrganizer(){
 
 // Status card for the organizer's current menu, with a manual Close / Reopen control.
 function menuStatusCard(menu){
+  // Edit mode: the card expands to show editable item rows, an add row, and
+  // Save / Cancel. Items only — date/cutoff stay managed by the post form above.
+  if(orgCardEditing){
+    return `<div class="card">
+      <div class="row mc-head" style="justify-content:space-between; align-items:center; gap:8px;">
+        <span style="font-weight:600;">Edit menu \u00B7 ${fmtDate(menu.menu_date)}</span>
+      </div>
+      <div id="card-builder" style="margin-top:8px;"></div>
+      <input type="text" id="ce-name" placeholder="Food name" style="margin-top:8px;">
+      <div class="row" style="margin-top:8px;">
+        <input type="number" id="ce-price" placeholder="&#8369; price" inputmode="numeric" style="flex:1;">
+        <button id="ce-add" style="flex-shrink:0;">+ Add</button>
+      </div>
+      <button id="ce-save" class="primary" style="width:100%; margin-top:12px;">Save changes</button>
+      <button id="ce-cancel" class="small-btn" style="width:100%; margin-top:8px;">Cancel</button>
+    </div>`;
+  }
   const closed=isClosed(menu);
   const manual = menu.is_open===false;
   const past = (menu.menu_date||todayKey()) < todayKey();
@@ -1064,20 +1061,59 @@ function menuStatusCard(menu){
   // Reopen only makes sense while the menu's date is today or future
   // (reopening a past-dated menu wouldn't show in Browse anyway).
   const canReopen = manual && !past;
-  let btn='';
+  let toggleBtn='';
   if(!closed){
-    btn=`<button id="m-toggle-open" class="small-btn danger" style="margin-top:10px;">Close menu now</button>`;
+    toggleBtn=`<button id="m-toggle-open" class="small-btn danger">Close menu now</button>`;
   } else if(canReopen){
-    btn=`<button id="m-toggle-open" class="small-btn" style="margin-top:10px;">Reopen menu</button>`;
+    toggleBtn=`<button id="m-toggle-open" class="small-btn">Reopen menu</button>`;
   }
+  // Edit is offered as long as the menu isn't past-dated.
+  const editBtn = !past ? `<button id="m-card-edit" class="small-btn">Edit items</button>` : '';
+  const actions = (editBtn||toggleBtn)
+    ? `<div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">${editBtn}${toggleBtn}</div>` : '';
   return `<div class="card">
     <div class="row mc-head" style="justify-content:space-between; align-items:center; gap:8px;">
       <span class="mc-title" style="font-weight:500; white-space:nowrap; min-width:0; flex:0 1 auto; transform-origin:left center; display:inline-block;">Current menu \u00B7 ${fmtDate(menu.menu_date)}</span>
       <span style="flex:0 0 auto;">${pill}</span>
     </div>
     <p class="muted" style="margin:6px 0 0;">${reason}</p>
-    ${btn}
+    ${actions}
   </div>`;
+}
+
+// Render the editable item rows inside the expanded card (edit mode).
+function renderCardBuilder(){
+  const el=$('card-builder'); if(!el) return;
+  if(!cardDraft.length){ el.innerHTML='<p class="muted" style="margin:4px 0;">No items. Add at least one below.</p>'; return; }
+  el.innerHTML=cardDraft.map((m,i)=>`
+    <div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px;">
+      <input type="text" class="cd-name" data-i="${i}" value="${esc(m.name)}" placeholder="Food name" style="flex:1; min-width:0;">
+      <input type="number" class="cd-price" data-i="${i}" value="${m.price}" inputmode="numeric" placeholder="&#8369;" style="width:84px; flex:0 0 auto;">
+      <button class="small-btn d cd-del" data-i="${i}" style="flex:0 0 auto;" aria-label="Remove item">\u2715</button>
+    </div>`).join('');
+  el.querySelectorAll('.cd-name').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].name=inp.value; });
+  el.querySelectorAll('.cd-price').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].price=Number(inp.value)||0; });
+  el.querySelectorAll('.cd-del').forEach(b=>b.onclick=()=>{ cardDraft.splice(+b.dataset.i,1); renderCardBuilder(); });
+}
+
+// Wire the Current menu card's edit affordances after each render.
+function wireMenuCardEdit(menu){
+  if(!menu) return;
+  const edit=$('m-card-edit');
+  if(edit) edit.onclick=async()=>{
+    // Load the menu's saved items into the working draft, then expand the card.
+    const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id).order('id',{ascending:true});
+    cardDraft=(items||[]).map(it=>({id:it.id, name:it.name, price:Number(it.price)}));
+    orgCardEditing=true;
+    viewOrganizer();
+  };
+  if(orgCardEditing){
+    renderCardBuilder();
+    const add=$('ce-add');
+    if(add) add.onclick=()=>{ const n=$('ce-name'),p=$('ce-price'); if(!n.value.trim())return; cardDraft.push({name:n.value.trim(),price:Number(p.value)||0}); n.value='';p.value='';renderCardBuilder();n.focus(); };
+    const save=$('ce-save'); if(save) save.onclick=()=>saveMenuEdits(menu);
+    const cancel=$('ce-cancel'); if(cancel) cancel.onclick=()=>{ orgCardEditing=false; cardDraft=[]; viewOrganizer(); };
+  }
 }
 
 // Flip is_open and refresh the organizer view.
@@ -1094,17 +1130,7 @@ async function toggleMenuOpen(menu){
 }
 function renderBuilder(){
   const el=$('builder'); if(!el) return;
-  if(!orgDraft.length){ el.innerHTML='<p class="muted" style="margin:4px 0;">Add items to the menu below.</p>'; return; }
-  // Each row is editable in place: change the food name or price, or remove it.
-  // Edits write straight back into orgDraft so Save/Publish uses current values.
-  el.innerHTML=orgDraft.map((m,i)=>`
-    <div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px;">
-      <input type="text" class="d-name" data-i="${i}" value="${esc(m.name)}" placeholder="Food name" style="flex:1; min-width:0;">
-      <input type="number" class="d-price" data-i="${i}" value="${m.price}" inputmode="numeric" placeholder="&#8369;" style="width:84px; flex:0 0 auto;">
-      <button class="small-btn d" data-i="${i}" style="flex:0 0 auto;" aria-label="Remove item">\u2715</button>
-    </div>`).join('');
-  el.querySelectorAll('.d-name').forEach(inp=>inp.oninput=()=>{ orgDraft[+inp.dataset.i].name=inp.value; });
-  el.querySelectorAll('.d-price').forEach(inp=>inp.oninput=()=>{ orgDraft[+inp.dataset.i].price=Number(inp.value)||0; });
+  el.innerHTML=orgDraft.length?orgDraft.map((m,i)=>`<div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border);"><span style="flex:1;">${esc(m.name)}</span><span class="price">${peso(m.price)}</span><button class="small-btn d" data-i="${i}">\u2715</button></div>`).join(''):'<p class="muted" style="margin:4px 0;">Add items to the new menu below.</p>';
   el.querySelectorAll('.d').forEach(b=>b.onclick=()=>{orgDraft.splice(+b.dataset.i,1);renderBuilder();});
 }
 async function publishMenu(){
@@ -1119,29 +1145,19 @@ async function publishMenu(){
   if(error){ alert(error.message); return; }
   await sb.from('menu_items').insert(items.map(d=>({menu_id:menu.id,name:d.name,price:d.price})));
   alert('Menu published!');
-  orgEditMenuId=null;
   viewOrganizer();
 }
-// Save edits to an existing menu in place. Updates the menu's date/cutoff, then
-// syncs menu_items: update changed rows, insert new ones, delete removed ones.
-// Customer Browse, the order flow, and analytics all read menu_items fresh, so
-// these changes show up everywhere on next load. Existing orders keep the
-// item names/prices stored on their own order_items rows and are untouched.
+// Save edits made on the Current menu card. Reconciles menu_items: update
+// changed rows, insert new ones, delete removed ones. Customer Browse, the
+// order flow, and analytics all read menu_items fresh, so these changes show
+// up everywhere on next load. Existing orders keep the item names/prices
+// stored on their own order_items rows and are untouched.
 async function saveMenuEdits(menu){
   if(!menu) return;
-  const items=orgDraft.map(d=>({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0})).filter(d=>d.name);
-  if(!items.length){ alert('Keep at least one item with a name, or start a new menu.'); return; }
-  const cutoffOn=$('m-cutoff-on').checked;
-  const cutoff=cutoffOn?($('m-cutoff').value||null):null;
-  if(cutoffOn && !cutoff){ alert('Set a cutoff time, or turn the cutoff off.'); return; }
+  const items=cardDraft.map(d=>({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0})).filter(d=>d.name);
+  if(!items.length){ alert('Keep at least one item with a name.'); return; }
 
-  // 1) menu-level fields
-  const {error:mErr}=await sb.from('menus').update({
-    menu_date:$('m-date').value.trim(), cutoff_time:cutoff
-  }).eq('id',menu.id);
-  if(mErr){ alert(mErr.message); return; }
-
-  // 2) figure out which existing rows to delete (removed in the editor)
+  // 1) figure out which existing rows to delete (removed in the editor)
   const {data:existing}=await sb.from('menu_items').select('id').eq('menu_id',menu.id);
   const keptIds=new Set(items.filter(d=>d.id).map(d=>d.id));
   const toDelete=(existing||[]).map(r=>r.id).filter(id=>!keptIds.has(id));
@@ -1150,13 +1166,13 @@ async function saveMenuEdits(menu){
     if(dErr){ alert(dErr.message); return; }
   }
 
-  // 3) update existing rows
+  // 2) update existing rows
   for(const d of items.filter(x=>x.id)){
     const {error:uErr}=await sb.from('menu_items').update({name:d.name,price:d.price}).eq('id',d.id);
     if(uErr){ alert(uErr.message); return; }
   }
 
-  // 4) insert newly added rows
+  // 3) insert newly added rows
   const toInsert=items.filter(x=>!x.id).map(d=>({menu_id:menu.id,name:d.name,price:d.price}));
   if(toInsert.length){
     const {error:iErr}=await sb.from('menu_items').insert(toInsert);
@@ -1164,7 +1180,7 @@ async function saveMenuEdits(menu){
   }
 
   alert('Menu updated!');
-  orgEditMenuId=null;
+  orgCardEditing=false;
   viewOrganizer();
 }
 async function loadOrgOrders(menu){
