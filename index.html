@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1a3a5c">
 <meta name="color-scheme" content="light only">
 <title>Axsilog</title>
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' rx='40' fill='%231a3a5c'/%3E%3Cg stroke-linecap='round' stroke-width='16'%3E%3Cline x1='62' y1='66' x2='118' y2='114' stroke='%231a3a5c'/%3E%3Cline x1='62' y1='114' x2='90' y2='90' stroke='%23f5a03c'/%3E%3Cline x1='90' y1='90' x2='118' y2='66' stroke='%231a3a5c'/%3E%3C/g%3E%3Ctext x='90' y='150' font-family='Arial' font-size='30' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3EAxsilog%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' rx='40' fill='%231a3a5c'/%3E%3Cg stroke-linecap='round' stroke-width='16'%3E%3Cline x1='62' y1='66' x2='118' y2='114' stroke='%23ffffff'/%3E%3Cline x1='118' y1='66' x2='62' y2='114' stroke='%23ffffff'/%3E%3C/g%3E%3Ctext x='90' y='150' font-family='Arial' font-size='30' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3EAxsilog%3C/text%3E%3C/svg%3E">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -183,6 +183,13 @@
   .anon-check input[type=checkbox]{flex:none; width:1.35rem; height:1.35rem; margin:0; accent-color:var(--info-fg, #1a3a5c); cursor:pointer;}
   .rating-summary{display:flex; align-items:center; gap:10px; margin:0 0 12px;}
   .rating-big{font-size:2rem; font-weight:700; color:var(--text); line-height:1;}
+  /* ----- review pagination ----- */
+  .pager{display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:6px; margin-top:12px;}
+  .pager button{min-height:34px; min-width:34px; padding:0 10px; font-size:.82rem; font-weight:600; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); background:var(--surface); color:var(--text-2);}
+  .pager button.active{background:var(--navy); color:#fff; border-color:var(--navy);}
+  .pager button:disabled{opacity:.4; cursor:not-allowed;}
+  .pager .pager-ellipsis{color:var(--text-3); font-size:.82rem; padding:0 2px;}
+  .pager-info{text-align:center; font-size:.74rem; color:var(--text-3); margin:8px 0 0;}
   /* ----- analytics ----- */
   .rank-row{display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:0.5px solid var(--border);}
   .rank-row:last-child{border-bottom:none;}
@@ -206,8 +213,7 @@
       <text x="0" y="42" font-family="'Plus Jakarta Sans',-apple-system,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">a</text>
       <g stroke-linecap="round" stroke-width="6">
         <line x1="30" y1="18" x2="58" y2="42" stroke="#1a3a5c"/>
-        <line x1="30" y1="42" x2="44" y2="30" stroke="#f5a03c"/>
-        <line x1="44" y1="30" x2="58" y2="18" stroke="#1a3a5c"/>
+        <line x1="58" y1="18" x2="30" y2="42" stroke="#1a3a5c"/>
       </g>
       <text x="62" y="42" font-family="'Plus Jakarta Sans',-apple-system,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">silog</text>
     </svg>
@@ -252,8 +258,7 @@
         <text x="0" y="42" font-family="'Plus Jakarta Sans',-apple-system,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">a</text>
         <g stroke-linecap="round" stroke-width="6">
           <line x1="30" y1="18" x2="58" y2="42" stroke="#1a3a5c"/>
-          <line x1="30" y1="42" x2="44" y2="30" stroke="#f5a03c"/>
-          <line x1="44" y1="30" x2="58" y2="18" stroke="#1a3a5c"/>
+          <line x1="58" y1="18" x2="30" y2="42" stroke="#1a3a5c"/>
         </g>
         <text x="62" y="42" font-family="'Plus Jakarta Sans',-apple-system,Segoe UI,Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-2" fill="#1a3a5c">silog</text>
       </svg>
@@ -629,6 +634,7 @@ async function viewOrganizerMenu(orgId){
           <button class="reset" id="rev-sort" data-dir="desc" style="height:2.4rem; flex:0 0 auto; padding:0 12px; font-size:.82rem; font-weight:600; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); white-space:nowrap;">Newest &#8595;</button>
         </div>
         <div id="rev-list"></div>
+        <div id="rev-pager"></div>
       </div>
     </div>`;
   } else {
@@ -662,9 +668,11 @@ async function viewOrganizerMenu(orgId){
   (document.getElementById('back-browse2')||{}).onclick=()=>{viewingOrganizer=null; viewBrowse(); scrollTo(0,0);};
   const revToggle=$('rev-toggle');
   if(revToggle){
-    // Render the review list applying the current food filter + sort direction.
-    const renderReviews=()=>{
-      const list=$('rev-list'); if(!list) return;
+    const REV_PER_PAGE=5;     // reviews shown per page
+    let revPage=1;            // current page (1-indexed)
+    // Build the list of reviews matching the current food filter + sort,
+    // then render only the current page's slice plus a compact pager.
+    const currentRows=()=>{
       const food=($('rev-food')||{}).value||'';
       const sortEl=$('rev-sort');
       const dir=(sortEl&&sortEl.dataset.dir)||'desc';
@@ -674,7 +682,18 @@ async function viewOrganizerMenu(orgId){
         const ta=new Date(a.reviewed_at||a.created_at), tb=new Date(b.reviewed_at||b.created_at);
         return dir==='asc'? ta-tb : tb-ta;
       });
-      list.innerHTML = rows.length ? rows.map(o=>{
+      return rows;
+    };
+    const renderReviews=()=>{
+      const list=$('rev-list'); if(!list) return;
+      const rows=currentRows();
+      const total=rows.length;
+      const pageCount=Math.max(1, Math.ceil(total/REV_PER_PAGE));
+      if(revPage>pageCount) revPage=pageCount;
+      if(revPage<1) revPage=1;
+      const start=(revPage-1)*REV_PER_PAGE;
+      const pageRows=rows.slice(start, start+REV_PER_PAGE);
+      list.innerHTML = total ? pageRows.map(o=>{
         const foods=foodFor(o);
         const its=foods.map(esc).join(', ');
         const when=fmtDateShort(o.reviewed_at||o.created_at);
@@ -688,18 +707,46 @@ async function viewOrganizerMenu(orgId){
           ${when?`<span class="muted" style="display:inline-block; margin:6px 0 0; font-size:.68rem; opacity:.75;">${when}</span>`:''}
         </div>`;
       }).join('') : '<p class="muted" style="font-size:.85rem;">No reviews match this filter.</p>';
+      renderPager(total, pageCount, start, pageRows.length);
+    };
+    // Compact pager: Prev / windowed page numbers / Next, plus a "from–to of N" line.
+    const renderPager=(total, pageCount, start, shownCount)=>{
+      const pager=$('rev-pager'); if(!pager) return;
+      if(total<=REV_PER_PAGE){ pager.innerHTML=''; return; }
+      // windowed page numbers: first, last, current\u00B11, with ellipses
+      const nums=[];
+      const push=n=>{ if(!nums.includes(n) && n>=1 && n<=pageCount) nums.push(n); };
+      push(1); push(pageCount);
+      for(let d=-1; d<=1; d++) push(revPage+d);
+      nums.sort((a,b)=>a-b);
+      let btns='';
+      let prev=0;
+      nums.forEach(n=>{
+        if(prev && n-prev>1) btns+=`<span class="pager-ellipsis">\u2026</span>`;
+        btns+=`<button class="rev-page${n===revPage?' active':''}" data-p="${n}">${n}</button>`;
+        prev=n;
+      });
+      pager.innerHTML=`<div class="pager">
+          <button class="rev-prev" ${revPage<=1?'disabled':''}>\u2039</button>
+          ${btns}
+          <button class="rev-next" ${revPage>=pageCount?'disabled':''}>\u203A</button>
+        </div>
+        <p class="pager-info">${start+1}\u2013${start+shownCount} of ${total}</p>`;
+      pager.querySelectorAll('.rev-page').forEach(b=>b.onclick=()=>{ revPage=Number(b.dataset.p)||1; renderReviews(); });
+      const pv=pager.querySelector('.rev-prev'); if(pv) pv.onclick=()=>{ if(revPage>1){ revPage--; renderReviews(); } };
+      const nx=pager.querySelector('.rev-next'); if(nx) nx.onclick=()=>{ if(revPage<pageCount){ revPage++; renderReviews(); } };
     };
     revToggle.onclick=()=>{
       const panel=$('rev-panel'); const open=!panel.classList.contains('hide');
       panel.classList.toggle('hide'); revToggle.textContent = open ? 'See reviews' : 'Hide reviews';
-      if(!open) renderReviews();
+      if(!open){ revPage=1; renderReviews(); }
     };
-    const foodSel=$('rev-food'); if(foodSel) foodSel.onchange=renderReviews;
+    const foodSel=$('rev-food'); if(foodSel) foodSel.onchange=()=>{ revPage=1; renderReviews(); };
     const sortBtn=$('rev-sort'); if(sortBtn) sortBtn.onclick=()=>{
       const next = sortBtn.dataset.dir==='desc' ? 'asc' : 'desc';
       sortBtn.dataset.dir=next;
       sortBtn.innerHTML = next==='desc' ? 'Newest \u2193' : 'Oldest \u2191';
-      renderReviews();
+      revPage=1; renderReviews();
     };
   }
   if(!closed){
@@ -995,7 +1042,6 @@ async function viewOrganizer(){
       </div>
       <button id="m-publish" class="primary" style="width:100%; margin-top:12px;">Publish new menu</button>
     </div>
-    ${menu?menuStatusCard(menu):''}
     ${menu?menuStatusCard(menu):''}
     <div class="card">
       <div class="row" style="justify-content:space-between; align-items:center;">
@@ -1386,6 +1432,7 @@ async function loadOrgOrders(menu){
         const proofGone = !o.proof_url && o.proof_expired
           ? `<span class="small-btn" style="opacity:.6; cursor:default;" title="Proof files are auto-deleted after 30 days to save storage">&#128465;&#65039; Proof expired</span>`
           : '';
+        let actions;
         if(!o.paid){
           actions = o.proof_url
             ? `<a class="small-btn" href="${esc(o.proof_url)}" target="_blank" style="text-decoration:none;">View proof</a>
