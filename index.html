@@ -413,6 +413,23 @@ function showsInBrowse(menu){
   if(!menu || !menu.menu_date) return true;  // dateless legacy menu: keep
   return menu.menu_date >= todayKey();
 }
+
+// Which menu represents an organizer in Browse / on their page.
+//   1. only menus dated today or later are candidates (showsInBrowse)
+//   2. a menu still accepting orders beats a closed one — this is what
+//      keeps a stale "Closed" pill from sticking after a new menu is posted
+//   3. otherwise soonest menu_date wins; ties go to the newest menu
+function pickBrowseMenu(list){
+  const cands=(list||[]).filter(showsInBrowse);
+  if(!cands.length) return null;
+  const rank=m=>isClosed(m)?1:0;
+  return cands.slice().sort((a,b)=>{
+    const r=rank(a)-rank(b); if(r) return r;
+    const da=a.menu_date||'', db=b.menu_date||'';
+    if(da!==db) return da<db?-1:1;
+    return new Date(b.created_at)-new Date(a.created_at);
+  })[0];
+}
 function timeLabel(t){
   if(!t) return '';
   const [h,m]=t.split(':').map(Number);
@@ -517,16 +534,13 @@ async function viewBrowse(){
   v.innerHTML='<h2>Organizers</h2><p class="muted">Loading...</p>';
   const {data:orgs} = await sb.from('profiles').select('*').eq('role','organizer').eq('status','approved').order('display_name');
   if(!orgs || !orgs.length){ v.innerHTML='<h2>Organizers</h2><p class="muted">No organizers yet. Check back soon.</p>'; return; }
-  // get menus, then keep only today/upcoming for the Browse list
+  // get menus, then let pickBrowseMenu choose the representative one per organizer
+  // (open menus win over closed ones, so a newly posted menu replaces yesterday's)
   const {data:menus} = await sb.from('menus').select('*').order('created_at',{ascending:false});
-  const visibleMenus=(menus||[]).filter(showsInBrowse);
-  // prefer the soonest upcoming/today menu per organizer (by menu_date, then newest)
+  const byOrg={};
+  (menus||[]).forEach(m=>{ (byOrg[m.organizer_id]=byOrg[m.organizer_id]||[]).push(m); });
   const latest={};
-  visibleMenus.forEach(m=>{
-    const cur=latest[m.organizer_id];
-    if(!cur) { latest[m.organizer_id]=m; return; }
-    if((m.menu_date||'') < (cur.menu_date||'')) latest[m.organizer_id]=m; // earlier (closer) date wins
-  });
+  orgs.forEach(o=>{ const m=pickBrowseMenu(byOrg[o.id]); if(m) latest[o.id]=m; });
   v.innerHTML='<h2>Organizers</h2>'+orgs.map(o=>{
     const m=latest[o.id];
     const closed = m && isClosed(m);
@@ -550,8 +564,10 @@ async function viewOrganizerMenu(orgId){
   v.innerHTML='<button class="back" id="back-browse">&#8249; Back to organizers</button><p class="muted">Loading menu...</p>';
   $('back-browse').onclick=()=>{ viewingOrganizer=null; viewBrowse(); scrollTo(0,0); };
   const {data:org}=await sb.from('profiles').select('*').eq('id',orgId).single();
-  const {data:menus}=await sb.from('menus').select('*').eq('organizer_id',orgId).order('created_at',{ascending:false}).limit(1);
-  const menu=menus&&menus[0];
+  // same selection rule as Browse, so the card and this page never disagree.
+  // falls back to the newest menu when nothing is today/upcoming.
+  const {data:menus}=await sb.from('menus').select('*').eq('organizer_id',orgId).order('created_at',{ascending:false});
+  const menu=pickBrowseMenu(menus) || (menus&&menus[0]);
   // Pull this organizer's reviews for the rating summary. Reviews live on the
   // orders table, but other customers' orders may be hidden by row-level
   // security on a public Browse page \u2014 so we first try a public-readable
