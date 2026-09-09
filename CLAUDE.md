@@ -1,0 +1,92 @@
+# Axsilog
+
+Single-file lunch-ordering app for an office/community: organizers publish a daily
+menu, customers order, pay by QR, and upload payment proof; the organizer confirms
+and marks batches delivered.
+
+## Repo shape
+
+Everything lives in **`index.html`** (~1760 lines) — markup, CSS, and JS in one
+file, no build step, no dependencies to install. Vercel serves it as a static site.
+
+| Lines | Contents |
+|-------|----------|
+| 1–16 | `<head>`, PWA meta, Supabase CDN script, Google font |
+| 17–205 | `<style>` — CSS custom properties, then component styles |
+| 207–285 | `<body>` markup: header, tab bar, `#view` container, modal host |
+| 286–1758 | `<script>` — config, helpers, then one `view*()` function per tab |
+
+Because it is one file, **edit it surgically**. Never regenerate the whole file:
+find the function or style rule by name and change only that.
+
+## Deploy pipeline
+
+`git push origin main` → Vercel auto-builds → **https://axosilog.vercel.app**
+
+There is no staging branch and no preview gate on `main`; a push to `main` is a
+production deploy. Vercel project `axosilog` under team `alexretonas-projects`
+(ids in `.vercel/project.json`, gitignored).
+
+## Supabase
+
+Project ref `nstktluzwkdnewobjnep` — https://nstktluzwkdnewobjnep.supabase.co
+
+URL and **anon** key are hardcoded at `index.html:288-289`. That is correct for
+this app: the anon key is a public client credential and security lives in Row
+Level Security policies, not in hiding the key. Never put the *service role* key
+in this file.
+
+**There are no migration files in this repo.** The live Supabase project is the
+only source of truth for schema and RLS. Before writing a query against a table,
+check the actual columns in the dashboard rather than inferring them from usage.
+
+Tables in use: `profiles`, `menus`, `menu_items`, `orders`, `order_items`,
+`proofs`, `qr`, `reviews`, `public_reviews`.
+RPC: `get_public_reviews`. Storage buckets: `proofs`, `qr`.
+
+### Roles
+
+`profiles.role` is one of `customer` | `organizer` | `admin`, paired with
+`profiles.status` (`pending` | `approved`). A user applies to be an organizer,
+which sets `role='organizer', status='pending'`; an admin approves them from the
+Admin tab. Tabs are gated on this pair in `buildTabs()` (`index.html:517`).
+
+### Order lifecycle
+
+`new` → `confirmed` (organizer accepts, after proof upload) → delivered
+(batch via `applyBatchDeliver()`, or one-off via `singleDeliver()`).
+
+## Local backups
+
+Every iteration should be snapshotted before and/or after a change:
+
+```powershell
+.\snapshot.ps1 "before-qr-rewrite"   # -> backups\index-<stamp>-before-qr-rewrite.html
+.\snapshot.ps1 -List                 # browse snapshots
+.\snapshot.ps1 -Restore backups\index-20260909-174434-initial-clone.html
+```
+
+`backups\` is gitignored — it is a local safety net, separate from git history.
+`-Restore` snapshots the current file first, so restoring is never destructive.
+`backups\MANIFEST.txt` maps each snapshot to the commit it was taken at.
+
+## Git
+
+Repo-local identity is set to `Alex Retona <alexretona@gmail.com>` — the *global*
+identity on this machine is a different account (Megawide Foundation), so never
+rely on the global config here.
+
+`core.autocrlf=true` system-wide: the working tree is CRLF, the repo stores LF.
+When comparing this file against a copy from elsewhere (a download, the GitHub web
+editor), normalize line endings first or the whole file will look changed.
+
+## Conventions
+
+- Vanilla JS, no framework. `$(id)` is the `getElementById` helper.
+- Views render by assigning `innerHTML` to `#view`, then wiring handlers with
+  `querySelectorAll(...).forEach(el => el.onclick = ...)`. Follow that pattern —
+  do not introduce event delegation or a router.
+- All user-supplied text goes through `esc()` before landing in a template string.
+- Colors come from the CSS custom properties in `:root` (navy `--navy` is primary,
+  orange `--accent`). Do not hardcode hex values in new styles.
+- The layout is mobile-first and capped at `max-width:560px`; test at phone width.

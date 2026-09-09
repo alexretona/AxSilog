@@ -1,0 +1,13 @@
+# Local iteration snapshots — kept on disk, never pushed
+backups/
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Vercel CLI local link (contains no secrets, but Vercel convention is to ignore it)
+.vercel/
