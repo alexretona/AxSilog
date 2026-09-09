@@ -84,6 +84,31 @@ Repo-local identity is set to `Alex Retona <alexretona@gmail.com>` — the *glob
 identity on this machine is a different account (Megawide Foundation), so never
 rely on the global config here.
 
+### Two GitHub accounts on this machine
+
+The globally active `gh` account is **`megawidefoundationdashboard`** (a different
+project) and must stay that way. This repo belongs to **`alexretona`**.
+
+`git push` works normally — repo-local config appends Windows Credential Manager
+back onto the helper chain (`credential.https://github.com.helper=manager`),
+because the global `~/.gitconfig` clears it for GitHub URLs and `gh`'s own
+credential helper only ever serves the *active* account.
+
+**`gh` CLI commands do not.** Bare `gh` runs as megawide and will fail or act on
+the wrong account. Use the wrapper, which pulls alexretona's token from the
+Windows keyring at call time:
+
+```
+.\gha.cmd pr create --fill
+.\gha.cmd repo view
+```
+
+Equivalent one-liner in a POSIX shell:
+`GH_TOKEN=$(gh auth token --user alexretona) gh <args>`
+
+Never fix this with `gh auth switch` — that flips the active account globally and
+breaks the other project.
+
 `core.autocrlf=true` system-wide: the working tree is CRLF, the repo stores LF.
 When comparing this file against a copy from elsewhere (a download, the GitHub web
 editor), normalize line endings first or the whole file will look changed.
