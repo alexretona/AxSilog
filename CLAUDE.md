@@ -60,11 +60,19 @@ Admin tab. Tabs are gated on this pair in `buildTabs()` (`index.html:517`).
 
 Every iteration should be snapshotted before and/or after a change:
 
-```powershell
-.\snapshot.ps1 "before-qr-rewrite"   # -> backups\index-<stamp>-before-qr-rewrite.html
-.\snapshot.ps1 -List                 # browse snapshots
-.\snapshot.ps1 -Restore backups\index-20260909-174434-initial-clone.html
 ```
+.\snapshot.cmd "before-qr-rewrite"   # -> backups\index-<stamp>-before-qr-rewrite.html
+.\snapshot.cmd -List                 # browse snapshots
+.\snapshot.cmd -Restore backups\index-20260909-174434-initial-clone.html
+```
+
+**Use `snapshot.cmd`, not `snapshot.ps1` directly.** PowerShell's execution policy
+on this machine is the Windows default (`Restricted`), so calling the `.ps1`
+straight from a terminal fails with `UnauthorizedAccess`. The `.cmd` wrapper
+re-invokes it with a per-process `-ExecutionPolicy Bypass` and forwards all
+arguments, so no machine-wide policy change is needed. (No Group Policy is in
+force here — `MachinePolicy` and `UserPolicy` are both `Undefined` — which is why
+the per-process bypass is honoured.)
 
 `backups\` is gitignored — it is a local safety net, separate from git history.
 `-Restore` snapshots the current file first, so restoring is never destructive.
