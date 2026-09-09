@@ -202,6 +202,28 @@
   .fb-item{padding:11px 13px; border:0.5px solid var(--border); border-radius:var(--radius-sm); margin-bottom:8px; background:var(--surface);}
   .fb-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
   .org-closed{opacity:.6;}
+
+  /* ---- Food photos ---------------------------------------------------- */
+  /* Customer menu thumbnail. Fixed box so rows stay aligned whether or not
+     an item has a photo; the image itself is cropped to fill. */
+  .food-thumb{width:56px; height:56px; flex:0 0 auto; border-radius:var(--radius-xs); overflow:hidden;
+    background:var(--surface-2); border:0.5px solid var(--border); display:block;}
+  .food-thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+  /* Small square preview/button used in the organizer's item rows. */
+  .fp-cell{width:44px; height:44px; flex:0 0 auto; border-radius:var(--radius-xs); overflow:hidden;
+    border:0.5px dashed var(--border-2); background:var(--surface-2); padding:0; display:flex;
+    align-items:center; justify-content:center; cursor:pointer; color:var(--text-3); font-size:1.1rem; min-height:0;}
+  .fp-cell.has{border-style:solid;}
+  .fp-cell img{width:100%; height:100%; object-fit:cover; display:block;}
+  /* Photo picker modal: reusable library grid. */
+  .fp-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; max-height:46vh; overflow-y:auto;}
+  .fp-opt{position:relative; border:0.5px solid var(--border); border-radius:var(--radius-xs); overflow:hidden;
+    background:var(--surface-2); cursor:pointer; padding:0; min-height:0; aspect-ratio:1/1;}
+  .fp-opt img{width:100%; height:100%; object-fit:cover; display:block;}
+  .fp-opt .fp-cap{position:absolute; left:0; right:0; bottom:0; background:rgba(20,48,77,0.72); color:#fff;
+    font-size:.62rem; font-weight:600; padding:3px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .fp-opt.match{border:1.5px solid var(--accent);}
+  .fp-note{font-size:.72rem; color:var(--text-3); margin:8px 0 0;}
 </style>
 </head>
 <body>
@@ -243,11 +265,30 @@
     <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" required style="margin-bottom:12px;">
     <label class="fld">Password <span style="color:var(--danger-fg);">*</span></label>
     <input type="password" id="auth-pass" placeholder="At least 6 characters" autocomplete="current-password" required style="margin-bottom:14px;">
+    <div id="auth-forgot-wrap" class="row" style="justify-content:flex-end; margin:-6px 0 12px;">
+      <a href="#" id="auth-forgot" style="font-size:.78rem; font-weight:500;">Forgot password?</a>
+    </div>
     <button id="btn-login" class="primary" style="width:100%; margin-bottom:8px;">Log in</button>
     <button id="btn-signup" style="width:100%;">Create account</button>
     <p id="auth-err" class="err"></p>
   </div>
   <p class="muted center" id="auth-switch-line">New here? Tap "Create account" to sign up.</p>
+</div>
+
+<!-- ===== SET NEW PASSWORD (arrived from a reset email) ===== -->
+<div id="screen-reset" class="wrap hide" style="padding-top:3rem;">
+  <div class="center" style="margin-bottom:1.5rem;">
+    <h2 style="margin-bottom:6px;">Set a new password</h2>
+    <p class="muted" id="reset-sub">Choose a new password for your account.</p>
+  </div>
+  <div class="card">
+    <label class="fld">New password <span style="color:var(--danger-fg);">*</span></label>
+    <input type="password" id="reset-pass" placeholder="At least 6 characters" autocomplete="new-password" style="margin-bottom:12px;">
+    <label class="fld">Confirm new password <span style="color:var(--danger-fg);">*</span></label>
+    <input type="password" id="reset-pass2" placeholder="Re-enter the password" autocomplete="new-password" style="margin-bottom:14px;">
+    <button id="btn-reset-save" class="primary" style="width:100%;">Save new password</button>
+    <p id="reset-err" class="err"></p>
+  </div>
 </div>
 
 <!-- ===== APP ===== -->
@@ -449,6 +490,7 @@ function setAuthMode(m){
   authMode=m;
   const signup = m==='signup';
   $('signup-fields').classList.toggle('hide', !signup);
+  $('auth-forgot-wrap').classList.toggle('hide', signup);
   $('btn-login').classList.toggle('hide', signup);
   $('btn-signup').classList.toggle('hide', false);
   $('btn-signup').classList.toggle('primary', signup);
@@ -499,17 +541,70 @@ async function doLogin(){
 }
 async function doLogout(){ await sb.auth.signOut(); location.reload(); }
 
+// ---------- PASSWORD RESET ----------
+// True when this page load came from a reset email. Captured synchronously at
+// startup because the Supabase client strips the hash once it parses it.
+let recoveryMode = /[#&]type=recovery/.test(location.hash);
+sb.auth.onAuthStateChange(evt=>{ if(evt==='PASSWORD_RECOVERY'){ recoveryMode=true; showResetScreen(); } });
+
+// Send the reset email. Uses whatever is already typed in the email field so
+// the flow stays one tap on mobile.
+async function doForgotPassword(){
+  const email=$('auth-email').value.trim();
+  $('auth-err').style.color='var(--danger-fg)';
+  if(!email){ $('auth-err').textContent='Enter your email above first, then tap "Forgot password?".'; $('auth-email').focus(); return; }
+  if(!/^\S+@\S+\.\S+$/.test(email)){ $('auth-err').textContent='Please enter a valid email address.'; return; }
+  const btn=$('auth-forgot'); if(btn) btn.textContent='Sending…';
+  // Send them back to this same page; the link arrives with #type=recovery.
+  const redirectTo = location.origin + location.pathname;
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo});
+  if(btn) btn.textContent='Forgot password?';
+  if(error){ $('auth-err').textContent=error.message; return; }
+  // Deliberately the same message whether or not the address is registered, so
+  // the form can't be used to discover which emails have accounts.
+  $('auth-err').style.color='var(--ok-fg)';
+  $('auth-err').textContent='If that email has an account, a reset link is on its way. Check your inbox (and spam).';
+}
+
+function showResetScreen(){
+  $('screen-auth').classList.add('hide');
+  $('screen-app').classList.add('hide');
+  $('screen-reset').classList.remove('hide');
+}
+
+async function doPasswordReset(){
+  const p1=$('reset-pass').value, p2=$('reset-pass2').value;
+  const err=$('reset-err'); err.style.color='var(--danger-fg)';
+  if(p1.length<6){ err.textContent='Password must be at least 6 characters.'; return; }
+  if(p1!==p2){ err.textContent='The two passwords don’t match.'; return; }
+  const btn=$('btn-reset-save'); btn.disabled=true; btn.textContent='Saving…';
+  const {error}=await sb.auth.updateUser({password:p1});
+  btn.disabled=false; btn.textContent='Save new password';
+  if(error){ err.textContent=error.message; return; }
+  // The recovery link already signed them in, so go straight into the app.
+  recoveryMode=false;
+  $('screen-reset').classList.add('hide');
+  history.replaceState(null,'',location.pathname);
+  await boot();
+}
+
 $('btn-login').onclick=doLogin;
 $('btn-signup').onclick=doSignup;
 $('btn-logout').onclick=doLogout;
+$('auth-forgot').onclick=e=>{ e.preventDefault(); doForgotPassword(); };
+$('btn-reset-save').onclick=doPasswordReset;
 
 // ---------- BOOT ----------
 async function boot(){
   const {data:{session}} = await sb.auth.getSession();
+  // Arrived from a reset email: the link signs the user in, but they must set a
+  // new password before using the app.
+  if(recoveryMode && session){ showResetScreen(); return; }
   if(!session){ $('screen-auth').classList.remove('hide'); $('screen-app').classList.add('hide'); return; }
   if(pendingProfile) await applyPendingProfile(session.user.id);
   const {data:prof} = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   me = prof;
+  await detectPhotoSupport();
   $('screen-auth').classList.add('hide'); $('screen-app').classList.remove('hide');
   buildTabs();
 }
@@ -665,9 +760,10 @@ async function viewOrganizerMenu(orgId){
   html+= closed ? `<div class="closed-banner">&#128274; Ordering is closed${closedMsg}</div>`
                 : (menu.cutoff_time?`<p class="cutoff-info">&#128336; Order before ${timeLabel(menu.cutoff_time)}</p>`:'');
   html+=(items||[]).map((it,i)=> closed
-    ? `<div class="pick" style="opacity:.5;"><span style="flex:1;">${esc(it.name)}</span><span class="price">${peso(it.price)}</span></div>`
+    ? `<div class="pick" style="opacity:.5;">${foodThumbHtml(it)}<span style="flex:1;">${esc(it.name)}</span><span class="price">${peso(it.price)}</span></div>`
     : `<div class="pick">
-         <span style="flex:1;">${esc(it.name)}<br><span class="price" style="font-size:.82rem;">${peso(it.price)}</span></span>
+         ${foodThumbHtml(it)}
+         <span style="flex:1; min-width:0;">${esc(it.name)}<br><span class="price" style="font-size:.82rem;">${peso(it.price)}</span></span>
          <div class="qty-stepper">
            <button type="button" class="qminus" data-i="${i}">\u2212</button>
            <span class="qval" id="q${i}" data-i="${i}">0</span>
@@ -970,25 +1066,37 @@ async function cancelOrder(orderId){
 // Compress an image client-side before upload: downscale to a max dimension
 // and re-encode as JPEG. A ~2MB phone screenshot typically drops to ~150-250KB,
 // which keeps us well under the Supabase free-tier storage/egress caps.
-function compressImage(file, {maxDim=1200, quality=0.72}={}){
+function compressImage(file, {maxDim=1200, quality=0.72, maxBytes=0}={}){
   return new Promise((resolve)=>{
     if(!file || !file.type || !file.type.startsWith('image/')){ resolve(file); return; }
     const url=URL.createObjectURL(file);
     const img=new Image();
-    img.onload=()=>{
-      let {width:w, height:h}=img;
-      if(Math.max(w,h)>maxDim){ const s=maxDim/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
-      const canvas=document.createElement('canvas');
-      canvas.width=w; canvas.height=h;
-      const ctx=canvas.getContext('2d');
-      ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h); // flatten any transparency for JPEG
-      ctx.drawImage(img,0,0,w,h);
+    img.onload=async()=>{
       URL.revokeObjectURL(url);
-      canvas.toBlob(blob=>{
-        if(!blob){ resolve(file); return; }      // fall back to original on failure
-        if(blob.size>=file.size){ resolve(file); return; } // keep smaller of the two
-        resolve(blob);
-      }, 'image/jpeg', quality);
+      // Render the (optionally downscaled) image to a JPEG blob at quality q.
+      const draw=(dim,q)=>new Promise(res=>{
+        let {width:w, height:h}=img;
+        if(Math.max(w,h)>dim){ const sc=dim/Math.max(w,h); w=Math.round(w*sc); h=Math.round(h*sc); }
+        const canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        const ctx=canvas.getContext('2d');
+        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h); // flatten any transparency for JPEG
+        ctx.drawImage(img,0,0,w,h);
+        canvas.toBlob(b=>res(b), 'image/jpeg', q);
+      });
+      let blob=await draw(maxDim, quality);
+      // With a byte budget, keep squeezing: drop quality first (cheapest on
+      // visible detail), then shrink dimensions once quality bottoms out.
+      if(maxBytes && blob){
+        let dim=maxDim, q=quality;
+        while(blob && blob.size>maxBytes && (q>0.35 || dim>420)){
+          if(q>0.35) q=Math.max(0.35, q-0.12); else dim=Math.round(dim*0.8);
+          blob=await draw(dim,q);
+        }
+      }
+      if(!blob){ resolve(file); return; }      // fall back to original on failure
+      if(blob.size>=file.size){ resolve(file); return; } // keep smaller of the two
+      resolve(blob);
     };
     img.onerror=()=>{ URL.revokeObjectURL(url); resolve(file); };
     img.src=url;
@@ -1033,6 +1141,154 @@ async function uploadQR(file){
   return true;
 }
 
+// ---------- FOOD PHOTOS ----------
+// Customer-facing thumbnail; tapping opens the full image in a new tab.
+function foodThumbHtml(it){
+  if(!it || !it.photo_url) return '';
+  return '<a class="food-thumb" href="'+esc(it.photo_url)+'" target="_blank" rel="noopener">'+
+    '<img src="'+esc(it.photo_url)+'" alt="'+esc(it.name)+'" loading="lazy">'+
+  '</a>';
+}
+
+// Photos are optional. The whole feature is gated on PHOTOS_OK, which is probed
+// once at boot: until the menu_items.photo_url column exists (see
+// supabase/2026-09-09-food-photos.sql) no photo UI is rendered and no photo
+// columns are written, so the app behaves exactly as it did before.
+let PHOTOS_OK=false;
+async function detectPhotoSupport(){
+  const {error}=await sb.from('menu_items').select('photo_url').limit(1);
+  PHOTOS_OK = !error;
+}
+
+// Food photos are squeezed hard: they are decoration on a list row, and an
+// organizer may post a dozen a day. ~90 KB at 720px is plenty for a thumbnail
+// and a tap-to-enlarge view.
+const FOOD_PHOTO_OPTS={maxDim:720, quality:0.62, maxBytes:90000};
+
+// Cache of every distinct photo this organizer has attached before. Cleared on
+// each new upload so a fresh photo is immediately reusable.
+let photoLibCache=null;
+
+async function uploadFoodPhoto(file){
+  if(!file) return null;
+  const compressed=await compressImage(file, FOOD_PHOTO_OPTS);
+  const isJpeg = compressed!==file;
+  const ext = isJpeg ? 'jpg' : ((file.name.split('.').pop()||'jpg').toLowerCase());
+  const path=me.id+'/food-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)+'.'+ext;
+  const {error:upErr}=await sb.storage.from('food').upload(path,compressed,{upsert:true, contentType: isJpeg?'image/jpeg':undefined});
+  if(upErr){ alert('Photo upload failed: '+upErr.message); return null; }
+  const {data:pub}=sb.storage.from('food').getPublicUrl(path);
+  photoLibCache=null;
+  return {url:pub.publicUrl, path:path};
+}
+
+// The reusable library: distinct photos across all of this organizer's menus,
+// newest first. This is what lets a repeat dish keep its picture instead of
+// being re-uploaded.
+async function loadPhotoLibrary(){
+  if(photoLibCache) return photoLibCache;
+  if(!PHOTOS_OK){ photoLibCache=[]; return photoLibCache; }
+  const {data:menus}=await sb.from('menus').select('id').eq('organizer_id',me.id);
+  const ids=(menus||[]).map(m=>m.id);
+  if(!ids.length){ photoLibCache=[]; return photoLibCache; }
+  const {data:items}=await sb.from('menu_items').select('id,name,photo_url,photo_path')
+    .in('menu_id',ids).not('photo_path','is',null).order('id',{ascending:false});
+  const seen=new Set(), out=[];
+  (items||[]).forEach(it=>{
+    if(!it.photo_url || !it.photo_path || seen.has(it.photo_path)) return;
+    seen.add(it.photo_path);
+    out.push({name:it.name||'', url:it.photo_url, path:it.photo_path});
+  });
+  photoLibCache=out;
+  return out;
+}
+
+// Most recent photo used for this exact dish name (case-insensitive), so a
+// re-added dish can pick its picture back up automatically.
+async function photoForName(name){
+  const n=String(name||'').trim().toLowerCase();
+  if(!n) return null;
+  const lib=await loadPhotoLibrary();
+  return lib.find(e=>e.name.trim().toLowerCase()===n) || null;
+}
+
+// Photo chooser. Resolves to {url,path} when one is picked, null to clear the
+// current photo, or undefined when dismissed with no change.
+function pickFoodPhoto(itemName, current){
+  return new Promise(async resolve=>{
+    const lib=await loadPhotoLibrary();
+    const n=String(itemName||'').trim().toLowerCase();
+    const isMatch=e=>e.name.trim().toLowerCase()===n;
+    // Photos previously used for this same dish sort to the front.
+    const sorted=lib.slice().sort((a,b)=>(isMatch(a)?0:1)-(isMatch(b)?0:1));
+    const grid=sorted.map((e,i)=>
+      '<button type="button" class="fp-opt'+(isMatch(e)?' match':'')+'" data-i="'+i+'" title="'+esc(e.name)+'">'+
+        '<img src="'+esc(e.url)+'" alt="'+esc(e.name)+'" loading="lazy">'+
+        '<span class="fp-cap">'+esc(e.name||'Photo')+'</span>'+
+      '</button>').join('');
+    const reuseNote = sorted.length
+      ? '<p class="fp-note">Or reuse one you have posted before'+(sorted.some(isMatch)?' — matches for this dish are shown first':'')+':</p><div class="fp-grid">'+grid+'</div>'
+      : '<p class="fp-note">Photos you upload are saved and can be reused on later menus.</p>';
+    const bd=$('modal-backdrop');
+    $('modal-title').textContent = itemName ? ('Photo · '+itemName) : 'Food photo';
+    $('modal-body').innerHTML=
+      '<label class="small-btn" style="display:flex; width:100%; justify-content:center; cursor:pointer;">'+
+        '📷 Upload new photo'+
+        '<input type="file" id="fp-file" accept="image/*" style="display:none;">'+
+      '</label>'+reuseNote+
+      '<p id="fp-status" class="fp-note"></p>';
+    $('modal-input-wrap').classList.add('hide');
+    $('modal-ok').textContent='Remove photo';
+    $('modal-ok').classList.toggle('hide', !current);
+    $('modal-cancel').textContent='Cancel';
+    bd.classList.remove('hide');
+    const close=val=>{
+      bd.classList.add('hide');
+      $('modal-ok').onclick=null; $('modal-cancel').onclick=null; bd.onclick=null;
+      $('modal-ok').classList.remove('hide'); $('modal-ok').textContent='Confirm';
+      resolve(val);
+    };
+    $('modal-ok').onclick=()=>close(null);           // clear the photo
+    $('modal-cancel').onclick=()=>close(undefined);  // leave unchanged
+    bd.onclick=e=>{ if(e.target===bd) close(undefined); };
+    $('modal-body').querySelectorAll('.fp-opt').forEach(b=>b.onclick=()=>{
+      const e=sorted[+b.dataset.i];
+      close({url:e.url, path:e.path});
+    });
+    const f=$('fp-file');
+    if(f) f.onchange=async ev=>{
+      const file=ev.target.files && ev.target.files[0];
+      if(!file) return;
+      $('fp-status').textContent='Compressing and uploading…';
+      const up=await uploadFoodPhoto(file);
+      if(!up){ $('fp-status').textContent='Upload failed. Try another photo.'; return; }
+      close(up);
+    };
+  });
+}
+
+// The little square on an organizer's item row: shows the photo if set, a
+// camera glyph if not. Rendered only when PHOTOS_OK.
+function photoCellHtml(item, i, cls){
+  if(!PHOTOS_OK) return '';
+  const has=item && item.photo_url;
+  return '<button type="button" class="fp-cell'+(has?' has':'')+' '+cls+'" data-i="'+i+'" aria-label="'+(has?'Change photo':'Add photo')+'">'+
+    (has ? '<img src="'+esc(item.photo_url)+'" alt="">' : '📷')+
+  '</button>';
+}
+
+// Copy a draft row's photo onto a menu_items payload, but only when the schema
+// actually has the columns -- otherwise PostgREST rejects the whole write.
+// Storage objects are deliberately never deleted here: a photo can be shared by
+// several menu_items once it has been reused, so removing it from one row must
+// not break the others.
+function withPhoto(row, draft){
+  if(!PHOTOS_OK) return row;
+  row.photo_url  = (draft && draft.photo_url)  || null;
+  row.photo_path = (draft && draft.photo_path) || null;
+  return row;
+}
+
 // ---------- ORGANIZER (post menu + manage orders) ----------
 let orgDraft=[];
 let orgCardEditing=false; // true when the Current menu card is expanded into edit mode
@@ -1073,7 +1329,17 @@ async function viewOrganizer(){
   requestAnimationFrame(refitTitles);
   orgDraft=[];
   renderBuilder();
-  $('f-add').onclick=()=>{const n=$('f-name'),p=$('f-price'); if(!n.value.trim())return; orgDraft.push({name:n.value.trim(),price:Number(p.value)||0}); n.value='';p.value='';renderBuilder();n.focus();};
+  $('f-add').onclick=async()=>{
+    const n=$('f-name'),p=$('f-price');
+    if(!n.value.trim())return;
+    const name=n.value.trim();
+    const item={name:name, price:Number(p.value)||0};
+    // Recycle: a dish posted with a photo before keeps it, no re-upload needed.
+    const prev=await photoForName(name);
+    if(prev){ item.photo_url=prev.url; item.photo_path=prev.path; }
+    orgDraft.push(item);
+    n.value='';p.value='';renderBuilder();n.focus();
+  };
   $('m-cutoff-on').onchange=e=>{ $('m-cutoff').style.display=e.target.checked?'block':'none'; };
   $('m-publish').onclick=publishMenu;
   const tg=$('m-toggle-open'); if(tg) tg.onclick=()=>toggleMenuOpen(menu);
@@ -1150,6 +1416,7 @@ function renderCardBuilder(){
   if(!cardDraft.length){ el.innerHTML='<p class="muted" style="margin:4px 0;">No items. Add at least one below.</p>'; return; }
   el.innerHTML=cardDraft.map((m,i)=>`
     <div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px;">
+      ${photoCellHtml(m,i,'cd-photo')}
       <input type="text" class="cd-name" data-i="${i}" value="${esc(m.name)}" placeholder="Food name" style="flex:1; min-width:0;">
       <input type="number" class="cd-price" data-i="${i}" value="${m.price}" inputmode="numeric" placeholder="&#8369;" style="width:84px; flex:0 0 auto;">
       <button class="small-btn d cd-del" data-i="${i}" style="flex:0 0 auto;" aria-label="Remove item">\u2715</button>
@@ -1157,6 +1424,14 @@ function renderCardBuilder(){
   el.querySelectorAll('.cd-name').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].name=inp.value; });
   el.querySelectorAll('.cd-price').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].price=Number(inp.value)||0; });
   el.querySelectorAll('.cd-del').forEach(b=>b.onclick=()=>{ cardDraft.splice(+b.dataset.i,1); renderCardBuilder(); });
+  el.querySelectorAll('.cd-photo').forEach(b=>b.onclick=async()=>{
+    const it=cardDraft[+b.dataset.i];
+    const picked=await pickFoodPhoto(it.name, it.photo_url);
+    if(picked===undefined) return;
+    it.photo_url = picked ? picked.url : null;
+    it.photo_path = picked ? picked.path : null;
+    renderCardBuilder();
+  });
 }
 
 // Wire the Current menu card's edit affordances after each render.
@@ -1166,14 +1441,23 @@ function wireMenuCardEdit(menu){
   if(edit) edit.onclick=async()=>{
     // Load the menu's saved items into the working draft, then expand the card.
     const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id).order('id',{ascending:true});
-    cardDraft=(items||[]).map(it=>({id:it.id, name:it.name, price:Number(it.price)}));
+    cardDraft=(items||[]).map(it=>({id:it.id, name:it.name, price:Number(it.price), photo_url:it.photo_url||null, photo_path:it.photo_path||null}));
     orgCardEditing=true;
     viewOrganizer();
   };
   if(orgCardEditing){
     renderCardBuilder();
     const add=$('ce-add');
-    if(add) add.onclick=()=>{ const n=$('ce-name'),p=$('ce-price'); if(!n.value.trim())return; cardDraft.push({name:n.value.trim(),price:Number(p.value)||0}); n.value='';p.value='';renderCardBuilder();n.focus(); };
+    if(add) add.onclick=async()=>{
+      const n=$('ce-name'),p=$('ce-price');
+      if(!n.value.trim())return;
+      const name=n.value.trim();
+      const item={name:name, price:Number(p.value)||0};
+      const prev=await photoForName(name);
+      if(prev){ item.photo_url=prev.url; item.photo_path=prev.path; }
+      cardDraft.push(item);
+      n.value='';p.value='';renderCardBuilder();n.focus();
+    };
     const save=$('ce-save'); if(save) save.onclick=()=>saveMenuEdits(menu);
     const cancel=$('ce-cancel'); if(cancel) cancel.onclick=()=>{ orgCardEditing=false; cardDraft=[]; viewOrganizer(); };
   }
@@ -1193,11 +1477,19 @@ async function toggleMenuOpen(menu){
 }
 function renderBuilder(){
   const el=$('builder'); if(!el) return;
-  el.innerHTML=orgDraft.length?orgDraft.map((m,i)=>`<div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border);"><span style="flex:1;">${esc(m.name)}</span><span class="price">${peso(m.price)}</span><button class="small-btn d" data-i="${i}">\u2715</button></div>`).join(''):'<p class="muted" style="margin:4px 0;">Add items to the new menu below.</p>';
+  el.innerHTML=orgDraft.length?orgDraft.map((m,i)=>`<div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px; align-items:center;">${photoCellHtml(m,i,'bd-photo')}<span style="flex:1; min-width:0;">${esc(m.name)}</span><span class="price">${peso(m.price)}</span><button class="small-btn d" data-i="${i}">\u2715</button></div>`).join(''):'<p class="muted" style="margin:4px 0;">Add items to the new menu below.</p>';
   el.querySelectorAll('.d').forEach(b=>b.onclick=()=>{orgDraft.splice(+b.dataset.i,1);renderBuilder();});
+  el.querySelectorAll('.bd-photo').forEach(b=>b.onclick=async()=>{
+    const it=orgDraft[+b.dataset.i];
+    const picked=await pickFoodPhoto(it.name, it.photo_url);
+    if(picked===undefined) return;                       // dismissed
+    it.photo_url = picked ? picked.url : null;
+    it.photo_path = picked ? picked.path : null;
+    renderBuilder();
+  });
 }
 async function publishMenu(){
-  const items=orgDraft.map(d=>({name:(d.name||'').trim(),price:Number(d.price)||0})).filter(d=>d.name);
+  const items=orgDraft.map(d=>withPhoto({name:(d.name||'').trim(),price:Number(d.price)||0}, d)).filter(d=>d.name);
   if(!items.length){ alert('Add at least one item with a name.'); return; }
   const cutoffOn=$('m-cutoff-on').checked;
   const cutoff=cutoffOn?($('m-cutoff').value||null):null;
@@ -1206,7 +1498,7 @@ async function publishMenu(){
     organizer_id:me.id, menu_date:$('m-date').value.trim(), cutoff_time:cutoff, is_open:true
   }).select().single();
   if(error){ alert(error.message); return; }
-  await sb.from('menu_items').insert(items.map(d=>({menu_id:menu.id,name:d.name,price:d.price})));
+  await sb.from('menu_items').insert(items.map(d=>withPhoto({menu_id:menu.id,name:d.name,price:d.price}, d)));
   alert('Menu published!');
   viewOrganizer();
 }
@@ -1217,7 +1509,7 @@ async function publishMenu(){
 // stored on their own order_items rows and are untouched.
 async function saveMenuEdits(menu){
   if(!menu) return;
-  const items=cardDraft.map(d=>({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0})).filter(d=>d.name);
+  const items=cardDraft.map(d=>withPhoto({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0}, d)).filter(d=>d.name);
   if(!items.length){ alert('Keep at least one item with a name.'); return; }
 
   // 1) figure out which existing rows to delete (removed in the editor)
@@ -1231,12 +1523,12 @@ async function saveMenuEdits(menu){
 
   // 2) update existing rows
   for(const d of items.filter(x=>x.id)){
-    const {error:uErr}=await sb.from('menu_items').update({name:d.name,price:d.price}).eq('id',d.id);
+    const {error:uErr}=await sb.from('menu_items').update(withPhoto({name:d.name,price:d.price}, d)).eq('id',d.id);
     if(uErr){ alert(uErr.message); return; }
   }
 
   // 3) insert newly added rows
-  const toInsert=items.filter(x=>!x.id).map(d=>({menu_id:menu.id,name:d.name,price:d.price}));
+  const toInsert=items.filter(x=>!x.id).map(d=>withPhoto({menu_id:menu.id,name:d.name,price:d.price}, d));
   if(toInsert.length){
     const {error:iErr}=await sb.from('menu_items').insert(toInsert);
     if(iErr){ alert(iErr.message); return; }

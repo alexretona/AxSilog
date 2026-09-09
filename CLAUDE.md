@@ -42,7 +42,43 @@ check the actual columns in the dashboard rather than inferring them from usage.
 
 Tables in use: `profiles`, `menus`, `menu_items`, `orders`, `order_items`,
 `proofs`, `qr`, `reviews`, `public_reviews`.
-RPC: `get_public_reviews`. Storage buckets: `proofs`, `qr`.
+RPC: `get_public_reviews`. Storage buckets: `proofs`, `qr`, `food`.
+
+### Food photos are feature-gated
+
+`menu_items.photo_url` / `.photo_path` and the `food` bucket come from
+`supabase/2026-09-09-food-photos.sql`. The app probes for the column once per
+session (`detectPhotoSupport()`) and stores the answer in `PHOTOS_OK`:
+
+- `PHOTOS_OK === false` — no photo UI renders, and `withPhoto()` strips the photo
+  keys off every `menu_items` write, so payloads are identical to the
+  pre-photo app. This is what makes it safe to deploy the page before running
+  the SQL.
+- `PHOTOS_OK === true` — organizers get a photo square per item row, and
+  customers see thumbnails.
+
+Keep that gate intact when touching menu writes: sending `photo_url` to a
+database without the column makes PostgREST reject the whole statement, which
+would break publishing a menu entirely.
+
+Photos are compressed to a hard ~90 KB budget (`FOOD_PHOTO_OPTS`) by
+`compressImage`, which drops JPEG quality first and only then shrinks
+dimensions. Callers that pass no `maxBytes` (proof and QR uploads) keep their
+original single-pass behaviour.
+
+A photo can be **shared by several `menu_items`** once an organizer reuses it
+from the library, so removing a photo from an item only clears the columns —
+storage objects are deliberately never deleted. Do not add cleanup that deletes
+a `food` object when an item is removed.
+
+### Password reset
+
+`resetPasswordForEmail()` sends the user back to `location.origin +
+location.pathname`. **That exact URL must be in Supabase's Auth -> URL
+Configuration -> Redirect URLs**, or the emailed link fails. The return visit
+carries `#type=recovery`, which is captured synchronously at startup (the
+Supabase client strips the hash once it parses it) and routes the user to
+`#screen-reset` instead of into the app.
 
 ### Roles
 
