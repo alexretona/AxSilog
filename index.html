@@ -341,6 +341,30 @@ let orgRevFilter = { food:'', dir:'desc' }; // Analytics feedback: food filter +
 
 const $ = id => document.getElementById(id);
 const peso = n => '\u20B1'+Number(n||0).toLocaleString();
+// Supabase caps every select at 1000 rows and silently drops the rest, so a
+// plain select stops returning the newest rows once a table grows past that.
+// fetchAll pages through with .range() until a short page comes back.
+// `build` must return a fresh query with a stable .order(), e.g. by id.
+async function fetchAll(build){
+  const PAGE=1000, out=[];
+  for(let from=0;;from+=PAGE){
+    const {data,error}=await build().range(from, from+PAGE-1);
+    if(error){ console.error(error); break; }
+    out.push(...(data||[]));
+    if(!data || data.length<PAGE) break;
+  }
+  return out;
+}
+// order_items for many orders. Ids go out in chunks so the .in() list never
+// makes the request URL too long, and each chunk is paged via fetchAll.
+async function fetchOrderItems(orderIds){
+  const out=[];
+  for(let i=0;i<orderIds.length;i+=150){
+    const chunk=orderIds.slice(i,i+150);
+    out.push(...await fetchAll(()=>sb.from('order_items').select('*').in('order_id',chunk).order('id')));
+  }
+  return out;
+}
 // Shrink an inline element's font (via scale) until it fits beside its siblings
 // on a single line. Used so headers like "Current menu \u00B7 Sat, Jun 6" never
 // get clipped on narrow screens \u2014 the text scales down to fit instead.
@@ -706,7 +730,7 @@ async function viewOrganizerMenu(orgId){
   if(reviews.length){
     const revIds=reviews.map(o=>o.id).filter(Boolean);
     if(revIds.length){
-      const {data:revItems}=await sb.from('order_items').select('*').in('order_id',revIds);
+      const revItems=await fetchOrderItems(revIds);
       (revItems||[]).forEach(it=>{ (byOrderItems[it.order_id]=byOrderItems[it.order_id]||[]).push(it); });
     }
   }
@@ -889,10 +913,10 @@ async function placeOrder(menu, org, items, qty){
 async function viewMyOrders(){
   const v=$('view');
   v.innerHTML='<h2>My orders</h2><p class="muted">Loading...</p>';
-  const {data:orders}=await sb.from('orders').select('*').eq('customer_id',me.id).order('created_at',{ascending:false});
+  const orders=await fetchAll(()=>sb.from('orders').select('*').eq('customer_id',me.id).order('created_at',{ascending:false}).order('id'));
   if(!orders||!orders.length){ v.innerHTML='<h2>My orders</h2><p class="muted">You haven\'t ordered yet. Browse organizers to place one.</p>'; return; }
   const ids=orders.map(o=>o.id);
-  const {data:allItems}=await sb.from('order_items').select('*').in('order_id',ids);
+  const allItems=await fetchOrderItems(ids);
   const byOrder={}; (allItems||[]).forEach(it=>{(byOrder[it.order_id]=byOrder[it.order_id]||[]).push(it);});
   const orgIds=[...new Set(orders.map(o=>o.organizer_id))];
   const {data:orgs}=await sb.from('profiles').select('id,display_name,payment_qr_url').in('id',orgIds);
@@ -1540,10 +1564,10 @@ async function saveMenuEdits(menu){
 }
 async function loadOrgOrders(menu){
   const el=$('org-orders'); if(!el) return;
-  const {data:orders}=await sb.from('orders').select('*').eq('organizer_id',me.id).order('created_at',{ascending:false});
+  const orders=await fetchAll(()=>sb.from('orders').select('*').eq('organizer_id',me.id).order('created_at',{ascending:false}).order('id'));
   if(!orders||!orders.length){ el.innerHTML='<h3>Orders</h3><p class="muted">No orders yet.</p>'; return; }
   const ids=orders.map(o=>o.id);
-  const {data:allItems}=await sb.from('order_items').select('*').in('order_id',ids);
+  const allItems=await fetchOrderItems(ids);
   const byOrder={}; (allItems||[]).forEach(it=>{(byOrder[it.order_id]=byOrder[it.order_id]||[]).push(it);});
 
   // attach each customer's team/group (lives on the profile, not the order)
