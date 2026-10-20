@@ -388,6 +388,25 @@ function fitOneLine(el, minScale=0.72){
 function refitTitles(){ document.querySelectorAll('.mc-title').forEach(el=>fitOneLine(el)); }
 window.addEventListener('resize', ()=>requestAnimationFrame(refitTitles));
 const esc = s => String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Food names are retyped on every menu, so one dish turns up as "Beef steak",
+// "Beef Steak", "beef steak " or "Kare Kare-Laman". foodKey folds case, extra
+// spaces and spacing around - , / & so those land on one key.
+const foodKey = s => String(s||'').toLowerCase().trim()
+  .replace(/\s*([-,\/&])\s*/g,'$1').replace(/\s+/g,' ').replace(/[.\s]+$/,'');
+// Unique food list for a filter menu: [{key,label}] sorted by label. The label
+// is the spelling used most often (ties go to the more capitalised one).
+function uniqueFoods(names){
+  const by={};
+  names.forEach(n=>{
+    const k=foodKey(n); if(!k) return;
+    const label=String(n).trim().replace(/\s+/g,' ');
+    const c=by[k]||(by[k]={}); c[label]=(c[label]||0)+1;
+  });
+  const caps=s=>(s.match(/[A-Z]/g)||[]).length;
+  return Object.entries(by).map(([key,c])=>({key,
+    label:Object.entries(c).sort((a,b)=>b[1]-a[1]||caps(b[0])-caps(a[0]))[0][0]}))
+    .sort((a,b)=>a.label.localeCompare(b.label));
+}
 const TEAMS = ['Accounting & Finance','Business Enablement','Central Management','Human Resources','Marketing','Operations','Technology','Facilities, Clinic, Security','Others'];
 function teamSelectHtml(id, current){
   const opts = ['<option value="">— Select team / group —</option>']
@@ -749,11 +768,9 @@ async function viewOrganizerMenu(orgId){
   // Reviews can be filtered by the food item ordered and sorted by date.
   if(reviews.length){
     // Unique list of foods that appear in reviewed orders, for the filter menu.
-    const foodSet=new Set();
-    reviews.forEach(o=>foodFor(o).forEach(n=>foodSet.add(n)));
-    const foods=[...foodSet].sort((a,b)=>a.localeCompare(b));
+    const foods=uniqueFoods(reviews.flatMap(foodFor));
     const foodOpts=['<option value="">All food</option>']
-      .concat(foods.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`)).join('');
+      .concat(foods.map(f=>`<option value="${esc(f.key)}">${esc(f.label)}</option>`)).join('');
     html+=`<div class="card" style="margin-bottom:10px;">
       <div class="row" style="justify-content:space-between; align-items:center;">
         <div class="row" style="gap:8px; align-items:center;">
@@ -813,7 +830,7 @@ async function viewOrganizerMenu(orgId){
       const sortEl=$('rev-sort');
       const dir=(sortEl&&sortEl.dataset.dir)||'desc';
       let rows=reviews.slice();
-      if(food) rows=rows.filter(o=>foodFor(o).includes(food));
+      if(food) rows=rows.filter(o=>foodFor(o).some(n=>foodKey(n)===food));
       rows.sort((a,b)=>{
         const ta=new Date(a.reviewed_at||a.created_at), tb=new Date(b.reviewed_at||b.created_at);
         return dir==='asc'? ta-tb : tb-ta;
@@ -1827,11 +1844,9 @@ async function loadOrgOrders(menu){
       : '';
 
     // Feedback list: filter by food ordered + sort by review date (orgRevFilter).
-    const revFoodSet=new Set();
-    reviewed.forEach(o=>(byOrder[o.id]||[]).forEach(it=>revFoodSet.add(it.name)));
-    const revFoods=[...revFoodSet].sort((a,b)=>a.localeCompare(b));
+    const revFoods=uniqueFoods(reviewed.flatMap(o=>(byOrder[o.id]||[]).map(it=>it.name)));
     let fbRows=reviewed.slice();
-    if(orgRevFilter.food) fbRows=fbRows.filter(o=>(byOrder[o.id]||[]).some(it=>it.name===orgRevFilter.food));
+    if(orgRevFilter.food) fbRows=fbRows.filter(o=>(byOrder[o.id]||[]).some(it=>foodKey(it.name)===orgRevFilter.food));
     fbRows.sort((a,b)=>{
       const ta=new Date(a.reviewed_at||a.created_at), tb=new Date(b.reviewed_at||b.created_at);
       return orgRevFilter.dir==='asc'? ta-tb : tb-ta;
@@ -1839,7 +1854,7 @@ async function loadOrgOrders(menu){
     const fbControls = reviewed.length
       ? `<div class="row" style="gap:8px; margin:6px 0 12px;">
           <select id="orev-food" style="height:2.4rem; flex:1; font-size:.85rem;">
-            ${['<option value="">All food</option>'].concat(revFoods.map(f=>`<option value="${esc(f)}"${f===orgRevFilter.food?' selected':''}>${esc(f)}</option>`)).join('')}
+            ${['<option value="">All food</option>'].concat(revFoods.map(f=>`<option value="${esc(f.key)}"${f.key===orgRevFilter.food?' selected':''}>${esc(f.label)}</option>`)).join('')}
           </select>
           <button class="reset" id="orev-sort" style="height:2.4rem; flex:0 0 auto; padding:0 12px; font-size:.82rem; font-weight:600; border:0.5px solid var(--border-2); border-radius:var(--radius-sm); white-space:nowrap;">${orgRevFilter.dir==='desc'?'Newest \u2193':'Oldest \u2191'}</button>
         </div>`
