@@ -388,7 +388,7 @@ function fitOneLine(el, minScale=0.72){
 function refitTitles(){ document.querySelectorAll('.mc-title').forEach(el=>fitOneLine(el)); }
 window.addEventListener('resize', ()=>requestAnimationFrame(refitTitles));
 const esc = s => String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const TEAMS = ['Accounting & Finance','Business Enablement','Central Management','Human Resources','Operations','Technology','Facilities, Clinic, Security','Others'];
+const TEAMS = ['Accounting & Finance','Business Enablement','Central Management','Human Resources','Marketing','Operations','Technology','Facilities, Clinic, Security','Others'];
 function teamSelectHtml(id, current){
   const opts = ['<option value="">— Select team / group —</option>']
     .concat(TEAMS.map(t=>`<option${t===current?' selected':''}>${esc(t)}</option>`));
