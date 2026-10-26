@@ -647,7 +647,7 @@ async function boot(){
   if(pendingProfile) await applyPendingProfile(session.user.id);
   const {data:prof} = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   me = prof;
-  await detectPhotoSupport();
+  await Promise.all([detectPhotoSupport(), detectLimitSupport()]);
   $('screen-auth').classList.add('hide'); $('screen-app').classList.remove('hide');
   buildTabs();
 }
@@ -679,16 +679,20 @@ async function viewBrowse(){
   (menus||[]).forEach(m=>{ (byOrg[m.organizer_id]=byOrg[m.organizer_id]||[]).push(m); });
   const latest={};
   orgs.forEach(o=>{ const m=pickBrowseMenu(byOrg[o.id]); if(m) latest[o.id]=m; });
+  const limited=Object.values(latest).filter(m=>m.max_orders && !isClosed(m));
+  const avMap=await getAvailability(limited.map(m=>m.id));
   v.innerHTML='<h2>Organizers</h2>'+orgs.map(o=>{
     const m=latest[o.id];
-    const closed = m && isClosed(m);
+    const booked = m && !isClosed(m) && ordersLeft(m, avMap[String(m.id)])===0;
+    const closed = m && (isClosed(m) || booked);
     const dateNote = m ? (m.menu_date && m.menu_date>todayKey() ? fmtDate(m.menu_date)+' \u00B7 ' : '') : '';
     const sub = m
-      ? (closed ? '&#128274; Ordering closed' : (dateNote+'Menu posted'+(m.cutoff_time?' \u00B7 until '+timeLabel(m.cutoff_time):'')))
+      ? (booked ? '&#127915; Fully booked' : closed ? '&#128274; Ordering closed'
+         : (dateNote+'Menu posted'+(m.cutoff_time?' \u00B7 until '+timeLabel(m.cutoff_time):'')+(deliverLabel(m)?' \u00B7 delivery '+deliverLabel(m):'')))
       : 'No menu yet';
     return `<div class="org-card${closed?' org-closed':''}" data-id="${o.id}">
       <div class="row" style="justify-content:space-between;">
-        <span style="font-weight:500;">${esc(o.display_name)}${closed?' <span class="pill p-pending" style="margin-left:6px;">Closed</span>':''}</span>
+        <span style="font-weight:500;">${esc(o.display_name)}${closed?` <span class="pill p-pending" style="margin-left:6px;">${booked?'Full':'Closed'}</span>`:''}</span>
         <span class="muted">&#8250;</span>
       </div>
       <p class="muted" style="margin:4px 0 0;">${sub}</p>
@@ -793,18 +797,34 @@ async function viewOrganizerMenu(orgId){
     html+=`<p class="muted" style="margin:0 0 10px;">No reviews yet.</p>`;
   }
   if(!menu){ v.innerHTML=html+'<p class="muted">No menu posted yet.</p>'; $('back-browse2').onclick=()=>{viewingOrganizer=null; viewBrowse(); scrollTo(0,0);}; return; }
-  const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id);
+  const [{data:items}, avMap]=await Promise.all([
+    sb.from('menu_items').select('*').eq('menu_id',menu.id),
+    getAvailability([menu.id])
+  ]);
+  const av=avMap[String(menu.id)];
   html+=`<p class="muted" style="margin:0 0 8px;">${fmtDate(menu.menu_date)}</p>`;
-  const closed=isClosed(menu);
+  const slotsLeft=ordersLeft(menu, av);
+  const booked = slotsLeft===0;
+  const closed=isClosed(menu) || booked;
   const closedMsg = menu.is_open===false ? ' (closed by organizer)'
                    : (menu.cutoff_time ? ' (cutoff was '+timeLabel(menu.cutoff_time)+')' : '');
-  html+= closed ? `<div class="closed-banner">&#128274; Ordering is closed${closedMsg}</div>`
-                : (menu.cutoff_time?`<p class="cutoff-info">&#128336; Order before ${timeLabel(menu.cutoff_time)}</p>`:'');
-  html+=(items||[]).map((it,i)=> closed
-    ? `<div class="pick" style="opacity:.5;">${foodThumbHtml(it)}<span style="flex:1;">${esc(it.name)}</span><span class="price">${peso(it.price)}</span></div>`
+  const infoLines=[];
+  if(!closed && menu.cutoff_time) infoLines.push(`&#128336; Order before ${timeLabel(menu.cutoff_time)}`);
+  if(deliverLabel(menu)) infoLines.push(`&#128666; Delivery around ${deliverLabel(menu)}`);
+  if(!closed && slotsLeft!==null) infoLines.push(`&#127915; ${slotsLeft} of ${menu.max_orders} order slot${menu.max_orders!==1?'s':''} left`);
+  html+= booked && !isClosed(menu) ? `<div class="closed-banner">&#127915; Fully booked \u2014 this menu has reached its ${menu.max_orders}-order limit</div>`
+       : closed ? `<div class="closed-banner">&#128274; Ordering is closed${closedMsg}</div>` : '';
+  html+=infoLines.map(l=>`<p class="cutoff-info">${l}</p>`).join('');
+  // Servings left per dish (null = no limit). A sold-out dish shows but can't be picked.
+  const left=(items||[]).map(it=>servingsLeft(it, av));
+  const leftNote=i=> left[i]===null ? '' : left[i]===0
+    ? ' \u00B7 <span style="color:var(--danger-fg); font-weight:600;">Sold out</span>'
+    : ` \u00B7 <span class="muted">${left[i]} left</span>`;
+  html+=(items||[]).map((it,i)=> (closed || left[i]===0)
+    ? `<div class="pick" style="opacity:.5;">${foodThumbHtml(it)}<span style="flex:1; min-width:0;">${esc(it.name)}<br><span class="price" style="font-size:.82rem;">${peso(it.price)}</span>${leftNote(i)}</span></div>`
     : `<div class="pick">
          ${foodThumbHtml(it)}
-         <span style="flex:1; min-width:0;">${esc(it.name)}<br><span class="price" style="font-size:.82rem;">${peso(it.price)}</span></span>
+         <span style="flex:1; min-width:0;">${esc(it.name)}<br><span class="price" style="font-size:.82rem;">${peso(it.price)}</span>${leftNote(i)}</span>
          <div class="qty-stepper">
            <button type="button" class="qminus" data-i="${i}">\u2212</button>
            <span class="qval" id="q${i}" data-i="${i}">0</span>
@@ -905,7 +925,7 @@ async function viewOrganizerMenu(orgId){
   if(!closed){
     const qty=(items||[]).map(()=>0);
     const recalc=()=>{ const t=items.reduce((s,it,i)=>s+Number(it.price)*qty[i],0); $('ct').textContent=peso(t); };
-    v.querySelectorAll('.qplus').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; qty[i]++; $('q'+i).textContent=qty[i]; recalc(); });
+    v.querySelectorAll('.qplus').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; if(left[i]!==null && qty[i]>=left[i]) return; qty[i]++; $('q'+i).textContent=qty[i]; recalc(); });
     v.querySelectorAll('.qminus').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; if(qty[i]>0){qty[i]--; $('q'+i).textContent=qty[i]; recalc();} });
     $('place').onclick=()=>placeOrder(menu, org, items, qty);
   }
@@ -916,12 +936,30 @@ async function placeOrder(menu, org, items, qty){
   const picks=items.map((it,i)=>({...it, qty:qty[i]})).filter(p=>p.qty>0);
   if(!picks.length){ alert('Add at least one item (use + to set a quantity).'); return; }
   const total=picks.reduce((s,p)=>s+Number(p.price)*p.qty,0);
+  // Re-check limits right before ordering: others may have ordered since the
+  // menu was opened. The database triggers still have the final say.
+  if(LIMITS_OK && (menu.max_orders || picks.some(p=>p.max_qty))){
+    const av=(await getAvailability([menu.id]))[String(menu.id)];
+    if(ordersLeft(menu, av)===0){ alert('Sorry, this menu just got fully booked.'); viewOrganizerMenu(org.id); return; }
+    const short=picks.find(p=>{ const l=servingsLeft(p, av); return l!==null && p.qty>l; });
+    if(short){
+      const l=servingsLeft(short, av);
+      alert(l ? `Sorry, only ${l} left of ${short.name}. Please lower the quantity.` : `Sorry, ${short.name} just sold out.`);
+      viewOrganizerMenu(org.id); return;
+    }
+  }
   const {data:order,error}=await sb.from('orders').insert({
     menu_id:menu.id, organizer_id:org.id, customer_id:me.id,
     customer_name:me.display_name, customer_contact:me.contact||null, total, status:'new'
   }).select().single();
-  if(error){ alert(error.message); return; }
-  await sb.from('order_items').insert(picks.map(p=>({order_id:order.id, name:p.name, price:p.price, qty:p.qty})));
+  if(error){ alert(error.message); viewOrganizerMenu(org.id); return; }
+  const {error:itErr}=await sb.from('order_items').insert(picks.map(p=>({order_id:order.id, name:p.name, price:p.price, qty:p.qty})));
+  if(itErr){
+    // Items were rejected (e.g. a dish sold out a moment ago). Don't leave an
+    // order with no items behind: remove it, same as cancelling.
+    await sb.from('orders').delete().eq('id',order.id);
+    alert(itErr.message); viewOrganizerMenu(org.id); return;
+  }
   alert('Order placed! Track it under "My orders".');
   viewingOrganizer=null; activeTab='myorders'; buildTabs();
 }
@@ -938,6 +976,13 @@ async function viewMyOrders(){
   const orgIds=[...new Set(orders.map(o=>o.organizer_id))];
   const {data:orgs}=await sb.from('profiles').select('id,display_name,payment_qr_url').in('id',orgIds);
   const orgName={}; const orgQR={}; (orgs||[]).forEach(o=>{orgName[o.id]=o.display_name; orgQR[o.id]=o.payment_qr_url;});
+  // Delivery time lives on the menu; look it up for orders still on their way.
+  const deliverByMenu={};
+  const waitingMenuIds=[...new Set(orders.filter(o=>!o.delivered && o.menu_id).map(o=>o.menu_id))];
+  if(LIMITS_OK && waitingMenuIds.length){
+    const {data:ms}=await sb.from('menus').select('id,deliver_time').in('id',waitingMenuIds);
+    (ms||[]).forEach(m=>{ deliverByMenu[m.id]=m; });
+  }
   // Active = not yet paid (placed / pending payment). Completed = paid.
   const activeOrders=orders.filter(o=>!o.paid);
   const completedOrders=orders.filter(o=>o.paid);
@@ -1026,6 +1071,7 @@ async function viewMyOrders(){
     return `<div class="order">
       <div class="ohead"><span style="font-weight:500;">${esc(orgName[o.organizer_id]||'Organizer')}</span>${statusPill}</div>
       <p class="muted" style="margin:2px 0 0;">${fmtDateTime(o.created_at)}</p>
+      ${!o.delivered && deliverLabel(deliverByMenu[o.menu_id])?`<p class="muted" style="margin:2px 0 0;">&#128666; Delivery around ${deliverLabel(deliverByMenu[o.menu_id])}</p>`:''}
       <div class="oitems">${itemLines}</div>
       <div class="ohead"><span class="otot">Total: <b>${peso(o.total)}</b></span></div>
       ${payblock}
@@ -1330,6 +1376,52 @@ function withPhoto(row, draft){
   return row;
 }
 
+// Order limits + delivery time are gated the same way as photos: LIMITS_OK is
+// probed once at boot, and until supabase/2026-10-26-order-limits-delivery.sql
+// has run no limit UI renders and none of these columns are written.
+//   menus.max_orders    cap on orders for the menu (null = none)
+//   menus.deliver_time  'HH:MM' the organizer expects to deliver (null = not set)
+//   menu_items.max_qty  servings available for a dish (null = none)
+// The database triggers in that file are what actually enforce the caps; the
+// checks here are only there to show customers what is left.
+let LIMITS_OK=false;
+async function detectLimitSupport(){
+  const [a,b]=await Promise.all([
+    sb.from('menus').select('max_orders,deliver_time').limit(1),
+    sb.from('menu_items').select('max_qty').limit(1)
+  ]);
+  LIMITS_OK = !a.error && !b.error;
+}
+const posInt = v => { const n=Math.floor(Number(v)); return n>0 ? n : null; };
+function withMaxQty(row, draft){
+  if(!LIMITS_OK) return row;
+  row.max_qty = posInt(draft && draft.max_qty);
+  return row;
+}
+// Matches the server's lower(trim(name)) when pairing order_items to dishes.
+const limKey = s => String(s||'').trim().toLowerCase();
+// {menuId: {orders, sold:{limKey: qty}}} from the get_menu_availability RPC.
+// Empty when limits are off or the call fails, so callers treat that as
+// "nothing known" and fall back to showing no counts.
+async function getAvailability(menuIds){
+  const out={};
+  if(!LIMITS_OK || !menuIds.length) return out;
+  const {data,error}=await sb.rpc('get_menu_availability',{menu_ids:menuIds.map(String)});
+  if(error){ console.error(error); return out; }
+  (data||[]).forEach(r=>{ out[r.menu_id]={orders:Number(r.order_count)||0, sold:r.sold||{}}; });
+  return out;
+}
+// Remaining capacity for a menu given its availability row (or undefined).
+function ordersLeft(menu, av){
+  if(!menu || !menu.max_orders || !av) return null;
+  return Math.max(0, menu.max_orders - av.orders);
+}
+function servingsLeft(item, av){
+  if(!item || !item.max_qty || !av) return null;
+  return Math.max(0, item.max_qty - Number(av.sold[limKey(item.name)]||0));
+}
+const deliverLabel = menu => (menu && menu.deliver_time) ? timeLabel(menu.deliver_time) : '';
+
 // ---------- ORGANIZER (post menu + manage orders) ----------
 let orgDraft=[];
 let orgCardEditing=false; // true when the Current menu card is expanded into edit mode
@@ -1338,6 +1430,7 @@ async function viewOrganizer(){
   const v=$('view');
   const {data:menus}=await sb.from('menus').select('*').eq('organizer_id',me.id).order('created_at',{ascending:false}).limit(1);
   const menu=menus&&menus[0];
+  const av=menu ? (await getAvailability([menu.id]))[String(menu.id)] : null;
   let html=`<h2>Post today\u2019s menu</h2>
     <div class="card">
       <label class="fld">Menu date</label>
@@ -1347,15 +1440,30 @@ async function viewOrganizer(){
         <label class="switch"><input type="checkbox" id="m-cutoff-on" ${menu&&menu.cutoff_time?'checked':''}><span class="slider"></span></label>
       </div>
       <input type="time" id="m-cutoff" style="margin-bottom:10px;${menu&&menu.cutoff_time?'':'display:none;'}" value="${menu?esc(menu.cutoff_time||''):''}">
+      ${LIMITS_OK?`
+      <div class="toggle-row">
+        <label class="fld" style="margin:0;">Set a delivery time?</label>
+        <label class="switch"><input type="checkbox" id="m-deliver-on" ${menu&&menu.deliver_time?'checked':''}><span class="slider"></span></label>
+      </div>
+      <input type="time" id="m-deliver" style="margin-bottom:10px;${menu&&menu.deliver_time?'':'display:none;'}" value="${menu?esc((menu.deliver_time||'').slice(0,5)):''}">
+      <div class="toggle-row">
+        <label class="fld" style="margin:0;">Limit the number of orders?</label>
+        <label class="switch"><input type="checkbox" id="m-max-on" ${menu&&menu.max_orders?'checked':''}><span class="slider"></span></label>
+      </div>
+      <input type="number" id="m-max" min="1" inputmode="numeric" placeholder="Max orders, e.g. 30" style="margin-bottom:10px;${menu&&menu.max_orders?'':'display:none;'}" value="${menu&&menu.max_orders?menu.max_orders:''}">`:''}
       <div id="builder"></div>
       <input type="text" id="f-name" placeholder="Food name" style="margin-top:8px;">
-      <div class="row" style="margin-top:8px;">
+      ${LIMITS_OK?`<div class="row" style="margin-top:8px;">
+        <input type="number" id="f-price" placeholder="&#8369; price" inputmode="numeric" style="flex:1; min-width:0;">
+        <input type="number" id="f-max" min="1" placeholder="Servings" title="Max servings for this dish. Leave blank for no limit" inputmode="numeric" style="flex:1; min-width:0;">
+      </div>
+      <button id="f-add" style="width:100%; margin-top:8px;">+ Add item</button>`:`<div class="row" style="margin-top:8px;">
         <input type="number" id="f-price" placeholder="&#8369; price" inputmode="numeric" style="flex:1;">
         <button id="f-add" style="flex-shrink:0;">+ Add</button>
-      </div>
+      </div>`}
       <button id="m-publish" class="primary" style="width:100%; margin-top:12px;">Publish new menu</button>
     </div>
-    ${menu?menuStatusCard(menu):''}
+    ${menu?menuStatusCard(menu, av):''}
     <div class="card">
       <div class="row" style="justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">&#128179; Payment QR</h3>
@@ -1374,14 +1482,17 @@ async function viewOrganizer(){
     const n=$('f-name'),p=$('f-price');
     if(!n.value.trim())return;
     const name=n.value.trim();
-    const item={name:name, price:Number(p.value)||0};
+    const mx=$('f-max');
+    const item={name:name, price:Number(p.value)||0, max_qty:mx?posInt(mx.value):null};
     // Recycle: a dish posted with a photo before keeps it, no re-upload needed.
     const prev=await photoForName(name);
     if(prev){ item.photo_url=prev.url; item.photo_path=prev.path; }
     orgDraft.push(item);
-    n.value='';p.value='';renderBuilder();n.focus();
+    n.value='';p.value='';if(mx)mx.value='';renderBuilder();n.focus();
   };
   $('m-cutoff-on').onchange=e=>{ $('m-cutoff').style.display=e.target.checked?'block':'none'; };
+  const dOn=$('m-deliver-on'); if(dOn) dOn.onchange=e=>{ $('m-deliver').style.display=e.target.checked?'block':'none'; };
+  const mOn=$('m-max-on'); if(mOn) mOn.onchange=e=>{ $('m-max').style.display=e.target.checked?'block':'none'; };
   $('m-publish').onclick=publishMenu;
   const tg=$('m-toggle-open'); if(tg) tg.onclick=()=>toggleMenuOpen(menu);
   wireMenuCardEdit(menu);
@@ -1398,20 +1509,37 @@ async function viewOrganizer(){
 }
 
 // Status card for the organizer's current menu, with a manual Close / Reopen control.
-function menuStatusCard(menu){
+function menuStatusCard(menu, av){
   // Edit mode: the card expands to show editable item rows, an add row, and
-  // Save / Cancel. Items only — date/cutoff stay managed by the post form above.
+  // Save / Cancel. Date/cutoff stay managed by the post form above; the order
+  // limit and delivery time can be changed here so a full menu can be raised.
   if(orgCardEditing){
+    const limitFields = LIMITS_OK ? `
+      <div class="toggle-row" style="margin-top:8px;">
+        <label class="fld" style="margin:0;">Delivery time</label>
+        <label class="switch"><input type="checkbox" id="ce-deliver-on" ${menu.deliver_time?'checked':''}><span class="slider"></span></label>
+      </div>
+      <input type="time" id="ce-deliver" style="margin-bottom:6px;${menu.deliver_time?'':'display:none;'}" value="${esc((menu.deliver_time||'').slice(0,5))}">
+      <div class="toggle-row">
+        <label class="fld" style="margin:0;">Limit the number of orders</label>
+        <label class="switch"><input type="checkbox" id="ce-max-on" ${menu.max_orders?'checked':''}><span class="slider"></span></label>
+      </div>
+      <input type="number" id="ce-max" min="1" inputmode="numeric" placeholder="Max orders" style="margin-bottom:6px;${menu.max_orders?'':'display:none;'}" value="${menu.max_orders||''}">` : '';
     return `<div class="card">
       <div class="row mc-head" style="justify-content:space-between; align-items:center; gap:8px;">
         <span style="font-weight:600;">Edit menu \u00B7 ${fmtDate(menu.menu_date)}</span>
       </div>
+      ${limitFields}
       <div id="card-builder" style="margin-top:8px;"></div>
       <input type="text" id="ce-name" placeholder="Food name" style="margin-top:8px;">
-      <div class="row" style="margin-top:8px;">
+      ${LIMITS_OK?`<div class="row" style="margin-top:8px;">
+        <input type="number" id="ce-price" placeholder="&#8369; price" inputmode="numeric" style="flex:1; min-width:0;">
+        <input type="number" id="ce-max-qty" min="1" placeholder="Servings" title="Max servings for this dish. Leave blank for no limit" inputmode="numeric" style="flex:1; min-width:0;">
+      </div>
+      <button id="ce-add" style="width:100%; margin-top:8px;">+ Add item</button>`:`<div class="row" style="margin-top:8px;">
         <input type="number" id="ce-price" placeholder="&#8369; price" inputmode="numeric" style="flex:1;">
         <button id="ce-add" style="flex-shrink:0;">+ Add</button>
-      </div>
+      </div>`}
       <button id="ce-save" class="primary" style="width:100%; margin-top:12px;">Save changes</button>
       <button id="ce-cancel" class="small-btn" style="width:100%; margin-top:8px;">Cancel</button>
     </div>`;
@@ -1425,8 +1553,15 @@ function menuStatusCard(menu){
   else if(closed && menu.cutoff_time) reason='Cutoff time ('+timeLabel(menu.cutoff_time)+') has passed.';
   else if(menu.cutoff_time) reason='Accepting orders until '+timeLabel(menu.cutoff_time)+'.';
   else reason='Accepting orders through end of '+fmtDate(menu.menu_date)+'.';
+  const left=ordersLeft(menu, av);
+  const full = left===0 && !closed;
+  const extra=[];
+  if(deliverLabel(menu)) extra.push('&#128666; Delivery around '+deliverLabel(menu));
+  if(menu.max_orders) extra.push('&#127915; '+(av?av.orders+' of '+menu.max_orders+' orders taken':'Limit: '+menu.max_orders+' orders')+
+    (full?' \u2014 <b>full</b>. Edit the menu to raise the limit.':''));
   const pill = closed
     ? '<span class="pill p-pending">&#128274; Closed</span>'
+    : full ? '<span class="pill p-pending">&#127915; Full</span>'
     : '<span class="pill p-conf">&#128275; Open</span>';
   // Reopen only makes sense while the menu's date is today or future
   // (reopening a past-dated menu wouldn't show in Browse anyway).
@@ -1438,7 +1573,7 @@ function menuStatusCard(menu){
     toggleBtn=`<button id="m-toggle-open" class="small-btn">Reopen menu</button>`;
   }
   // Edit is offered as long as the menu isn't past-dated.
-  const editBtn = !past ? `<button id="m-card-edit" class="small-btn">Edit items</button>` : '';
+  const editBtn = !past ? `<button id="m-card-edit" class="small-btn">Edit menu</button>` : '';
   const actions = (editBtn||toggleBtn)
     ? `<div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap;">${editBtn}${toggleBtn}</div>` : '';
   return `<div class="card">
@@ -1447,6 +1582,7 @@ function menuStatusCard(menu){
       <span style="flex:0 0 auto;">${pill}</span>
     </div>
     <p class="muted" style="margin:6px 0 0;">${reason}</p>
+    ${extra.map(x=>`<p class="muted" style="margin:4px 0 0;">${x}</p>`).join('')}
     ${actions}
   </div>`;
 }
@@ -1458,12 +1594,20 @@ function renderCardBuilder(){
   el.innerHTML=cardDraft.map((m,i)=>`
     <div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px;">
       ${photoCellHtml(m,i,'cd-photo')}
-      <input type="text" class="cd-name" data-i="${i}" value="${esc(m.name)}" placeholder="Food name" style="flex:1; min-width:0;">
-      <input type="number" class="cd-price" data-i="${i}" value="${m.price}" inputmode="numeric" placeholder="&#8369;" style="width:84px; flex:0 0 auto;">
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;">
+        <input type="text" class="cd-name" data-i="${i}" value="${esc(m.name)}" placeholder="Food name" style="min-width:0;">
+        <div class="row" style="gap:6px; align-items:center;">
+          <span class="muted" style="font-size:.78rem;">&#8369;</span>
+          <input type="number" class="cd-price" data-i="${i}" value="${m.price}" inputmode="numeric" placeholder="price" style="flex:1; min-width:0;">
+          ${LIMITS_OK?`<span class="muted" style="font-size:.78rem;">Servings</span>
+          <input type="number" class="cd-max" data-i="${i}" min="1" value="${m.max_qty||''}" inputmode="numeric" placeholder="&#8734;" title="Max servings. Leave blank for no limit" style="flex:1; min-width:0;">`:''}
+        </div>
+      </div>
       <button class="small-btn d cd-del" data-i="${i}" style="flex:0 0 auto;" aria-label="Remove item">\u2715</button>
     </div>`).join('');
   el.querySelectorAll('.cd-name').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].name=inp.value; });
   el.querySelectorAll('.cd-price').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].price=Number(inp.value)||0; });
+  el.querySelectorAll('.cd-max').forEach(inp=>inp.oninput=()=>{ cardDraft[+inp.dataset.i].max_qty=posInt(inp.value); });
   el.querySelectorAll('.cd-del').forEach(b=>b.onclick=()=>{ cardDraft.splice(+b.dataset.i,1); renderCardBuilder(); });
   el.querySelectorAll('.cd-photo').forEach(b=>b.onclick=async()=>{
     const it=cardDraft[+b.dataset.i];
@@ -1482,22 +1626,25 @@ function wireMenuCardEdit(menu){
   if(edit) edit.onclick=async()=>{
     // Load the menu's saved items into the working draft, then expand the card.
     const {data:items}=await sb.from('menu_items').select('*').eq('menu_id',menu.id).order('id',{ascending:true});
-    cardDraft=(items||[]).map(it=>({id:it.id, name:it.name, price:Number(it.price), photo_url:it.photo_url||null, photo_path:it.photo_path||null}));
+    cardDraft=(items||[]).map(it=>({id:it.id, name:it.name, price:Number(it.price), photo_url:it.photo_url||null, photo_path:it.photo_path||null, max_qty:it.max_qty||null}));
     orgCardEditing=true;
     viewOrganizer();
   };
   if(orgCardEditing){
     renderCardBuilder();
+    const dOn=$('ce-deliver-on'); if(dOn) dOn.onchange=e=>{ $('ce-deliver').style.display=e.target.checked?'block':'none'; };
+    const mOn=$('ce-max-on'); if(mOn) mOn.onchange=e=>{ $('ce-max').style.display=e.target.checked?'block':'none'; };
     const add=$('ce-add');
     if(add) add.onclick=async()=>{
       const n=$('ce-name'),p=$('ce-price');
       if(!n.value.trim())return;
       const name=n.value.trim();
-      const item={name:name, price:Number(p.value)||0};
+      const mx=$('ce-max-qty');
+      const item={name:name, price:Number(p.value)||0, max_qty:mx?posInt(mx.value):null};
       const prev=await photoForName(name);
       if(prev){ item.photo_url=prev.url; item.photo_path=prev.path; }
       cardDraft.push(item);
-      n.value='';p.value='';renderCardBuilder();n.focus();
+      n.value='';p.value='';if(mx)mx.value='';renderCardBuilder();n.focus();
     };
     const save=$('ce-save'); if(save) save.onclick=()=>saveMenuEdits(menu);
     const cancel=$('ce-cancel'); if(cancel) cancel.onclick=()=>{ orgCardEditing=false; cardDraft=[]; viewOrganizer(); };
@@ -1518,7 +1665,7 @@ async function toggleMenuOpen(menu){
 }
 function renderBuilder(){
   const el=$('builder'); if(!el) return;
-  el.innerHTML=orgDraft.length?orgDraft.map((m,i)=>`<div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px; align-items:center;">${photoCellHtml(m,i,'bd-photo')}<span style="flex:1; min-width:0;">${esc(m.name)}</span><span class="price">${peso(m.price)}</span><button class="small-btn d" data-i="${i}">\u2715</button></div>`).join(''):'<p class="muted" style="margin:4px 0;">Add items to the new menu below.</p>';
+  el.innerHTML=orgDraft.length?orgDraft.map((m,i)=>`<div class="row" style="padding:8px 0; border-bottom:0.5px solid var(--border); gap:8px; align-items:center;">${photoCellHtml(m,i,'bd-photo')}<span style="flex:1; min-width:0;">${esc(m.name)}${m.max_qty?`<br><span class="muted" style="font-size:.78rem;">${m.max_qty} servings</span>`:''}</span><span class="price">${peso(m.price)}</span><button class="small-btn d" data-i="${i}">\u2715</button></div>`).join(''):'<p class="muted" style="margin:4px 0;">Add items to the new menu below.</p>';
   el.querySelectorAll('.d').forEach(b=>b.onclick=()=>{orgDraft.splice(+b.dataset.i,1);renderBuilder();});
   el.querySelectorAll('.bd-photo').forEach(b=>b.onclick=async()=>{
     const it=orgDraft[+b.dataset.i];
@@ -1529,17 +1676,38 @@ function renderBuilder(){
     renderBuilder();
   });
 }
+// Read a toggle + input pair from the menu forms. Returns {ok, value}; ok is
+// false (after alerting) when the toggle is on but the input is empty/invalid.
+function readToggled(onId, inId, parse, missingMsg){
+  const on=$(onId), inp=$(inId);
+  if(!on || !on.checked || !inp) return {ok:true, value:null};
+  const value=parse(inp.value);
+  if(value===null || value===''){ alert(missingMsg); return {ok:false}; }
+  return {ok:true, value};
+}
+// The menus columns the limit/delivery UI manages, read from the form whose
+// inputs carry the given id prefix ('m' for publish, 'ce' for the edit card).
+// Returns null (after alerting) on invalid input, {} when limits are off.
+function readMenuLimits(pfx){
+  if(!LIMITS_OK) return {};
+  const dt=readToggled(pfx+'-deliver-on', pfx+'-deliver', v=>v||null, 'Set a delivery time, or turn it off.');
+  if(!dt.ok) return null;
+  const mx=readToggled(pfx+'-max-on', pfx+'-max', posInt, 'Enter the maximum number of orders (1 or more), or turn the limit off.');
+  if(!mx.ok) return null;
+  return {deliver_time:dt.value, max_orders:mx.value};
+}
 async function publishMenu(){
-  const items=orgDraft.map(d=>withPhoto({name:(d.name||'').trim(),price:Number(d.price)||0}, d)).filter(d=>d.name);
+  const items=orgDraft.map(d=>withMaxQty(withPhoto({name:(d.name||'').trim(),price:Number(d.price)||0}, d), d)).filter(d=>d.name);
   if(!items.length){ alert('Add at least one item with a name.'); return; }
   const cutoffOn=$('m-cutoff-on').checked;
   const cutoff=cutoffOn?($('m-cutoff').value||null):null;
   if(cutoffOn && !cutoff){ alert('Set a cutoff time, or turn the cutoff off.'); return; }
+  const limits=readMenuLimits('m'); if(!limits) return;
   const {data:menu,error}=await sb.from('menus').insert({
-    organizer_id:me.id, menu_date:$('m-date').value.trim(), cutoff_time:cutoff, is_open:true
+    organizer_id:me.id, menu_date:$('m-date').value.trim(), cutoff_time:cutoff, is_open:true, ...limits
   }).select().single();
   if(error){ alert(error.message); return; }
-  await sb.from('menu_items').insert(items.map(d=>withPhoto({menu_id:menu.id,name:d.name,price:d.price}, d)));
+  await sb.from('menu_items').insert(items.map(d=>withMaxQty(withPhoto({menu_id:menu.id,name:d.name,price:d.price}, d), d)));
   alert('Menu published!');
   viewOrganizer();
 }
@@ -1550,8 +1718,13 @@ async function publishMenu(){
 // stored on their own order_items rows and are untouched.
 async function saveMenuEdits(menu){
   if(!menu) return;
-  const items=cardDraft.map(d=>withPhoto({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0}, d)).filter(d=>d.name);
+  const items=cardDraft.map(d=>withMaxQty(withPhoto({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0}, d), d)).filter(d=>d.name);
   if(!items.length){ alert('Keep at least one item with a name.'); return; }
+  const limits=readMenuLimits('ce'); if(!limits) return;
+  if(Object.keys(limits).length){
+    const {error:mErr}=await sb.from('menus').update(limits).eq('id',menu.id);
+    if(mErr){ alert(mErr.message); return; }
+  }
 
   // 1) figure out which existing rows to delete (removed in the editor)
   const {data:existing}=await sb.from('menu_items').select('id').eq('menu_id',menu.id);
@@ -1564,12 +1737,12 @@ async function saveMenuEdits(menu){
 
   // 2) update existing rows
   for(const d of items.filter(x=>x.id)){
-    const {error:uErr}=await sb.from('menu_items').update(withPhoto({name:d.name,price:d.price}, d)).eq('id',d.id);
+    const {error:uErr}=await sb.from('menu_items').update(withMaxQty(withPhoto({name:d.name,price:d.price}, d), d)).eq('id',d.id);
     if(uErr){ alert(uErr.message); return; }
   }
 
   // 3) insert newly added rows
-  const toInsert=items.filter(x=>!x.id).map(d=>withPhoto({menu_id:menu.id,name:d.name,price:d.price}, d));
+  const toInsert=items.filter(x=>!x.id).map(d=>withMaxQty(withPhoto({menu_id:menu.id,name:d.name,price:d.price}, d), d));
   if(toInsert.length){
     const {error:iErr}=await sb.from('menu_items').insert(toInsert);
     if(iErr){ alert(iErr.message); return; }

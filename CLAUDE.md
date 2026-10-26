@@ -71,6 +71,25 @@ from the library, so removing a photo from an item only clears the columns —
 storage objects are deliberately never deleted. Do not add cleanup that deletes
 a `food` object when an item is removed.
 
+### Order limits and delivery time are feature-gated
+
+`menus.max_orders`, `menus.deliver_time`, `menu_items.max_qty`, the
+`get_menu_availability` RPC and two enforcement triggers come from
+`supabase/2026-10-26-order-limits-delivery.sql`. Same pattern as photos:
+`detectLimitSupport()` probes once per session into `LIMITS_OK`; while it is
+`false` no limit/delivery UI renders and `withMaxQty()` / `readMenuLimits()`
+add nothing to writes.
+
+- Customers can't read other people's orders (RLS), so "slots left" / "N left"
+  come from `get_menu_availability`, which counts server-side.
+- The page pre-checks before ordering, but the **triggers are the real
+  enforcement** (they lock the menu row so simultaneous orders queue). If the
+  `order_items` insert is rejected, `placeOrder()` deletes the just-created
+  order so no item-less order is left behind.
+- Dish servings are matched by `lower(trim(name))` within the menu, because
+  `order_items` stores the dish name, not a `menu_items` id. Renaming a dish
+  mid-day resets its count.
+
 ### Password reset
 
 `resetPasswordForEmail()` sends the user back to `location.origin +
