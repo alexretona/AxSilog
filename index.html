@@ -1733,8 +1733,12 @@ async function toggleMenuOpen(menu){
     const ok=await uiConfirm('Close menu?', 'Customers won\u2019t be able to place new orders for this menu. You can reopen it later today if needed.');
     if(!ok) return;
   }
-  const {error}=await sb.from('menus').update({is_open: !(menu.is_open===false)}).eq('id',menu.id);
+  // Manually closed -> reopen; otherwise close. Ask for the row back: an update
+  // RLS refuses returns no error and no rows, which would look like nothing.
+  const reopen = menu.is_open===false;
+  const {data,error}=await sb.from('menus').update({is_open: reopen}).eq('id',menu.id).select('id');
   if(error){ alert(error.message); return; }
+  if(!data || !data.length){ alert('Could not '+(reopen?'reopen':'close')+' the menu: the database did not allow the change.'); return; }
   viewOrganizer();
 }
 function renderBuilder(){
