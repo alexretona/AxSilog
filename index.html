@@ -688,7 +688,7 @@ async function viewBrowse(){
     const dateNote = m ? (m.menu_date && m.menu_date>todayKey() ? fmtDate(m.menu_date)+' \u00B7 ' : '') : '';
     const sub = m
       ? (booked ? '&#127915; Fully booked' : closed ? '&#128274; Ordering closed'
-         : (dateNote+'Menu posted'+(m.cutoff_time?' \u00B7 until '+timeLabel(m.cutoff_time):'')+(deliverLabel(m)?' \u00B7 delivery '+deliverLabel(m):'')))
+         : (dateNote+'Menu posted'+(m.cutoff_time?' \u00B7 until '+cutoffLabel(m,true):'')+(deliverLabel(m)?' \u00B7 delivery '+deliverLabel(m,true):'')))
       : 'No menu yet';
     return `<div class="org-card${closed?' org-closed':''}" data-id="${o.id}">
       <div class="row" style="justify-content:space-between;">
@@ -809,8 +809,8 @@ async function viewOrganizerMenu(orgId){
   const closedMsg = menu.is_open===false ? ' (closed by organizer)'
                    : (menu.cutoff_time ? ' (cutoff was '+timeLabel(menu.cutoff_time)+')' : '');
   const infoLines=[];
-  if(!closed && menu.cutoff_time) infoLines.push(`&#128336; Order before ${timeLabel(menu.cutoff_time)}`);
-  if(deliverLabel(menu)) infoLines.push(`&#128666; Delivery around ${deliverLabel(menu)}`);
+  if(!closed && menu.cutoff_time) infoLines.push(`&#128336; Order before ${cutoffLabel(menu)}`);
+  if(deliverLabel(menu)) infoLines.push(`&#128666; Delivery ${deliverLabel(menu)}`);
   if(!closed && slotsLeft!==null) infoLines.push(`&#127915; ${slotsLeft} of ${menu.max_orders} order slot${menu.max_orders!==1?'s':''} left`);
   html+= booked && !isClosed(menu) ? `<div class="closed-banner">&#127915; Fully booked \u2014 this menu has reached its ${menu.max_orders}-order limit</div>`
        : closed ? `<div class="closed-banner">&#128274; Ordering is closed${closedMsg}</div>` : '';
@@ -980,7 +980,7 @@ async function viewMyOrders(){
   const deliverByMenu={};
   const waitingMenuIds=[...new Set(orders.filter(o=>!o.delivered && o.menu_id).map(o=>o.menu_id))];
   if(LIMITS_OK && waitingMenuIds.length){
-    const {data:ms}=await sb.from('menus').select('id,deliver_time').in('id',waitingMenuIds);
+    const {data:ms}=await sb.from('menus').select('id,menu_date,cutoff_time,deliver_time'+(DELIVER_DATE_OK?',deliver_date':'')).in('id',waitingMenuIds);
     (ms||[]).forEach(m=>{ deliverByMenu[m.id]=m; });
   }
   // Active = not yet paid (placed / pending payment). Completed = paid.
@@ -1071,7 +1071,7 @@ async function viewMyOrders(){
     return `<div class="order">
       <div class="ohead"><span style="font-weight:500;">${esc(orgName[o.organizer_id]||'Organizer')}</span>${statusPill}</div>
       <p class="muted" style="margin:2px 0 0;">${fmtDateTime(o.created_at)}</p>
-      ${!o.delivered && deliverLabel(deliverByMenu[o.menu_id])?`<p class="muted" style="margin:2px 0 0;">&#128666; Delivery around ${deliverLabel(deliverByMenu[o.menu_id])}</p>`:''}
+      ${!o.delivered && deliverLabel(deliverByMenu[o.menu_id])?`<p class="muted" style="margin:2px 0 0;">&#128666; Delivery ${deliverLabel(deliverByMenu[o.menu_id])}</p>`:''}
       <div class="oitems">${itemLines}</div>
       <div class="ohead"><span class="otot">Total: <b>${peso(o.total)}</b></span></div>
       ${payblock}
@@ -1385,12 +1385,17 @@ function withPhoto(row, draft){
 // The database triggers in that file are what actually enforce the caps; the
 // checks here are only there to show customers what is left.
 let LIMITS_OK=false;
+// menus.deliver_date came later (supabase/2026-10-27-delivery-date.sql), so it
+// has its own flag. Without it the delivery day is inferred: see deliverDayOffset.
+let DELIVER_DATE_OK=false;
 async function detectLimitSupport(){
-  const [a,b]=await Promise.all([
+  const [a,b,c]=await Promise.all([
     sb.from('menus').select('max_orders,deliver_time').limit(1),
-    sb.from('menu_items').select('max_qty').limit(1)
+    sb.from('menu_items').select('max_qty').limit(1),
+    sb.from('menus').select('deliver_date').limit(1)
   ]);
   LIMITS_OK = !a.error && !b.error;
+  DELIVER_DATE_OK = LIMITS_OK && !c.error;
 }
 const posInt = v => { const n=Math.floor(Number(v)); return n>0 ? n : null; };
 function withMaxQty(row, draft){
@@ -1420,7 +1425,33 @@ function servingsLeft(item, av){
   if(!item || !item.max_qty || !av) return null;
   return Math.max(0, item.max_qty - Number(av.sold[limKey(item.name)]||0));
 }
-const deliverLabel = menu => (menu && menu.deliver_time) ? timeLabel(menu.deliver_time) : '';
+function addDays(key, n){
+  const d=new Date(key+'T00:00:00'); if(isNaN(d)) return key;
+  d.setDate(d.getDate()+n); return dayKey(d);
+}
+// Days between the menu date and delivery: the stored deliver_date when set,
+// otherwise 1 if delivery is at or before the order cutoff (it can't be the
+// same day, e.g. order by 3 PM, deliver 6 AM), else 0.
+function deliverDayOffset(menu){
+  if(!menu || !menu.deliver_time) return 0;
+  if(menu.deliver_date && menu.menu_date){
+    return Math.round((new Date(menu.deliver_date+'T00:00:00')-new Date(menu.menu_date+'T00:00:00'))/864e5);
+  }
+  return (menu.cutoff_time && menu.deliver_time.slice(0,5)<=menu.cutoff_time.slice(0,5)) ? 1 : 0;
+}
+const shortDay = key => { const d=new Date(key+'T00:00:00'); return isNaN(d) ? key : d.toLocaleDateString([],{month:'short',day:'numeric'}); };
+// "Sat, Oct 31 \u00B7 6:00 AM" (short: "Oct 31, 6:00 AM"); '' when no delivery time.
+function deliverLabel(menu, short){
+  if(!menu || !menu.deliver_time) return '';
+  const key=menu.deliver_date || addDays(menu.menu_date||todayKey(), deliverDayOffset(menu));
+  return short ? shortDay(key)+', '+timeLabel(menu.deliver_time) : fmtDate(key)+' \u00B7 '+timeLabel(menu.deliver_time);
+}
+// Same format for the order cutoff, which is always on the menu's own date.
+function cutoffLabel(menu, short){
+  if(!menu || !menu.cutoff_time) return '';
+  const key=menu.menu_date||todayKey();
+  return short ? shortDay(key)+', '+timeLabel(menu.cutoff_time) : fmtDate(key)+' \u00B7 '+timeLabel(menu.cutoff_time);
+}
 
 // ---------- ORGANIZER (post menu + manage orders) ----------
 let orgDraft=[];
@@ -1445,7 +1476,13 @@ async function viewOrganizer(){
         <label class="fld" style="margin:0;">Set a delivery time?</label>
         <label class="switch"><input type="checkbox" id="m-deliver-on" ${menu&&menu.deliver_time?'checked':''}><span class="slider"></span></label>
       </div>
-      <input type="time" id="m-deliver" style="margin-bottom:10px;${menu&&menu.deliver_time?'':'display:none;'}" value="${menu?esc((menu.deliver_time||'').slice(0,5)):''}">
+      <div id="m-deliver-wrap" class="row" style="gap:8px; margin-bottom:10px;${(menu||{}).deliver_time?'':'display:none;'}">
+        <input type="time" id="m-deliver" style="flex:3; min-width:0;" value="${esc(((menu||{}).deliver_time||'').slice(0,5))}">
+        ${DELIVER_DATE_OK?`<select id="m-deliver-day" style="flex:2; min-width:0;">
+          <option value="0"${deliverDayOffset(menu)===0?' selected':''}>Same day</option>
+          <option value="1"${deliverDayOffset(menu)===1?' selected':''}>Next day</option>
+        </select>`:''}
+      </div>
       <div class="toggle-row">
         <label class="fld" style="margin:0;">Limit the number of orders?</label>
         <label class="switch"><input type="checkbox" id="m-max-on" ${menu&&menu.max_orders?'checked':''}><span class="slider"></span></label>
@@ -1491,7 +1528,15 @@ async function viewOrganizer(){
     n.value='';p.value='';if(mx)mx.value='';renderBuilder();n.focus();
   };
   $('m-cutoff-on').onchange=e=>{ $('m-cutoff').style.display=e.target.checked?'block':'none'; };
-  const dOn=$('m-deliver-on'); if(dOn) dOn.onchange=e=>{ $('m-deliver').style.display=e.target.checked?'block':'none'; };
+  const dOn=$('m-deliver-on'); if(dOn) dOn.onchange=e=>{ $('m-deliver-wrap').style.display=e.target.checked?'flex':'none'; };
+  // Suggest the delivery day as times change: a delivery at or before the
+  // cutoff must be the next day. The organizer can still override it.
+  const dDay=$('m-deliver-day');
+  const suggestDay=()=>{
+    const c=$('m-cutoff-on').checked && $('m-cutoff').value, t=$('m-deliver').value;
+    if(dDay && t) dDay.value = (c && t<=c) ? '1' : '0';
+  };
+  if(dDay){ $('m-deliver').addEventListener('change',suggestDay); $('m-cutoff').addEventListener('change',suggestDay); }
   const mOn=$('m-max-on'); if(mOn) mOn.onchange=e=>{ $('m-max').style.display=e.target.checked?'block':'none'; };
   $('m-publish').onclick=publishMenu;
   const tg=$('m-toggle-open'); if(tg) tg.onclick=()=>toggleMenuOpen(menu);
@@ -1519,7 +1564,13 @@ function menuStatusCard(menu, av){
         <label class="fld" style="margin:0;">Delivery time</label>
         <label class="switch"><input type="checkbox" id="ce-deliver-on" ${menu.deliver_time?'checked':''}><span class="slider"></span></label>
       </div>
-      <input type="time" id="ce-deliver" style="margin-bottom:6px;${menu.deliver_time?'':'display:none;'}" value="${esc((menu.deliver_time||'').slice(0,5))}">
+      <div id="ce-deliver-wrap" class="row" style="gap:8px; margin-bottom:6px;${menu.deliver_time?'':'display:none;'}">
+        <input type="time" id="ce-deliver" style="flex:3; min-width:0;" value="${esc((menu.deliver_time||'').slice(0,5))}">
+        ${DELIVER_DATE_OK?`<select id="ce-deliver-day" style="flex:2; min-width:0;">
+          <option value="0"${deliverDayOffset(menu)===0?' selected':''}>Same day</option>
+          <option value="1"${deliverDayOffset(menu)===1?' selected':''}>Next day</option>
+        </select>`:''}
+      </div>
       <div class="toggle-row">
         <label class="fld" style="margin:0;">Limit the number of orders</label>
         <label class="switch"><input type="checkbox" id="ce-max-on" ${menu.max_orders?'checked':''}><span class="slider"></span></label>
@@ -1551,12 +1602,12 @@ function menuStatusCard(menu, av){
   if(manual) reason='You closed this menu manually.';
   else if(past) reason='This menu\u2019s date has passed.';
   else if(closed && menu.cutoff_time) reason='Cutoff time ('+timeLabel(menu.cutoff_time)+') has passed.';
-  else if(menu.cutoff_time) reason='Accepting orders until '+timeLabel(menu.cutoff_time)+'.';
+  else if(menu.cutoff_time) reason='Accepting orders until '+cutoffLabel(menu)+'.';
   else reason='Accepting orders through end of '+fmtDate(menu.menu_date)+'.';
   const left=ordersLeft(menu, av);
   const full = left===0 && !closed;
   const extra=[];
-  if(deliverLabel(menu)) extra.push('&#128666; Delivery around '+deliverLabel(menu));
+  if(deliverLabel(menu)) extra.push('&#128666; Delivery '+deliverLabel(menu));
   if(menu.max_orders) extra.push('&#127915; '+(av?av.orders+' of '+menu.max_orders+' orders taken':'Limit: '+menu.max_orders+' orders')+
     (full?' \u2014 <b>full</b>. Edit the menu to raise the limit.':''));
   const pill = closed
@@ -1632,7 +1683,7 @@ function wireMenuCardEdit(menu){
   };
   if(orgCardEditing){
     renderCardBuilder();
-    const dOn=$('ce-deliver-on'); if(dOn) dOn.onchange=e=>{ $('ce-deliver').style.display=e.target.checked?'block':'none'; };
+    const dOn=$('ce-deliver-on'); if(dOn) dOn.onchange=e=>{ $('ce-deliver-wrap').style.display=e.target.checked?'flex':'none'; };
     const mOn=$('ce-max-on'); if(mOn) mOn.onchange=e=>{ $('ce-max').style.display=e.target.checked?'block':'none'; };
     const add=$('ce-add');
     if(add) add.onclick=async()=>{
@@ -1688,13 +1739,20 @@ function readToggled(onId, inId, parse, missingMsg){
 // The menus columns the limit/delivery UI manages, read from the form whose
 // inputs carry the given id prefix ('m' for publish, 'ce' for the edit card).
 // Returns null (after alerting) on invalid input, {} when limits are off.
-function readMenuLimits(pfx){
+// menuDate is the menu's own date, which the same-day / next-day choice is
+// relative to.
+function readMenuLimits(pfx, menuDate){
   if(!LIMITS_OK) return {};
   const dt=readToggled(pfx+'-deliver-on', pfx+'-deliver', v=>v||null, 'Set a delivery time, or turn it off.');
   if(!dt.ok) return null;
   const mx=readToggled(pfx+'-max-on', pfx+'-max', posInt, 'Enter the maximum number of orders (1 or more), or turn the limit off.');
   if(!mx.ok) return null;
-  return {deliver_time:dt.value, max_orders:mx.value};
+  const out={deliver_time:dt.value, max_orders:mx.value};
+  if(DELIVER_DATE_OK){
+    const day=$(pfx+'-deliver-day');
+    out.deliver_date = dt.value ? addDays(menuDate||todayKey(), Number(day&&day.value)||0) : null;
+  }
+  return out;
 }
 async function publishMenu(){
   const items=orgDraft.map(d=>withMaxQty(withPhoto({name:(d.name||'').trim(),price:Number(d.price)||0}, d), d)).filter(d=>d.name);
@@ -1702,7 +1760,7 @@ async function publishMenu(){
   const cutoffOn=$('m-cutoff-on').checked;
   const cutoff=cutoffOn?($('m-cutoff').value||null):null;
   if(cutoffOn && !cutoff){ alert('Set a cutoff time, or turn the cutoff off.'); return; }
-  const limits=readMenuLimits('m'); if(!limits) return;
+  const limits=readMenuLimits('m', $('m-date').value.trim()); if(!limits) return;
   const {data:menu,error}=await sb.from('menus').insert({
     organizer_id:me.id, menu_date:$('m-date').value.trim(), cutoff_time:cutoff, is_open:true, ...limits
   }).select().single();
@@ -1720,7 +1778,7 @@ async function saveMenuEdits(menu){
   if(!menu) return;
   const items=cardDraft.map(d=>withMaxQty(withPhoto({id:d.id, name:(d.name||'').trim(), price:Number(d.price)||0}, d), d)).filter(d=>d.name);
   if(!items.length){ alert('Keep at least one item with a name.'); return; }
-  const limits=readMenuLimits('ce'); if(!limits) return;
+  const limits=readMenuLimits('ce', menu.menu_date); if(!limits) return;
   if(Object.keys(limits).length){
     const {error:mErr}=await sb.from('menus').update(limits).eq('id',menu.id);
     if(mErr){ alert(mErr.message); return; }

@@ -86,6 +86,11 @@ add nothing to writes.
   enforcement** (they lock the menu row so simultaneous orders queue). If the
   `order_items` insert is rejected, `placeOrder()` deletes the just-created
   order so no item-less order is left behind.
+- `menus.deliver_date` (`supabase/2026-10-27-delivery-date.sql`) has its own
+  flag, `DELIVER_DATE_OK`. Organizers pick Same day / Next day; when the column
+  is missing or null, `deliverDayOffset()` infers next day if delivery is at or
+  before the cutoff. Show times via `cutoffLabel()` / `deliverLabel()` so the
+  date is always included.
 - Dish servings are matched by `lower(trim(name))` within the menu, because
   `order_items` stores the dish name, not a `menu_items` id. Renaming a dish
   mid-day resets its count.
