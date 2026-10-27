@@ -957,7 +957,7 @@ async function placeOrder(menu, org, items, qty){
   if(itErr){
     // Items were rejected (e.g. a dish sold out a moment ago). Don't leave an
     // order with no items behind: remove it, same as cancelling.
-    await sb.from('orders').delete().eq('id',order.id);
+    await removeMyOrder(order.id);
     alert(itErr.message); viewOrganizerMenu(org.id); return;
   }
   alert('Order placed! Track it under "My orders".');
@@ -1144,10 +1144,33 @@ async function cancelOrder(orderId){
   const {data:o}=await sb.from('orders').select('status,delivered').eq('id',orderId).single();
   if(!o || o.status!=='new' || o.delivered){ alert('This order can no longer be cancelled \u2014 the organizer has already confirmed it.'); viewMyOrders(); return; }
   if(!confirm('Cancel this order? This cannot be undone.')) return;
-  await sb.from('order_items').delete().eq('order_id',orderId);
-  const {error}=await sb.from('orders').delete().eq('id',orderId);
-  if(error){ alert(error.message); return; }
+  const err=await removeMyOrder(orderId);
+  if(err){ alert(err); viewMyOrders(); return; }
   viewMyOrders();
+}
+// Delete one of the signed-in customer's own orders and its items. Returns an
+// error message, or null on success.
+// Prefers the cancel_my_order RPC (supabase/2026-10-27-cancel-order.sql), which
+// checks ownership + status and deletes server-side. A plain delete that RLS
+// doesn't allow comes back with no error and no rows, which used to look like
+// the cancel button doing nothing, so the fallback asks for the deleted row
+// back and reports when there isn't one.
+async function removeMyOrder(orderId){
+  const r=await sb.rpc('cancel_my_order',{p_order:orderId});
+  if(!r.error) return null;
+  const missing = r.error.code==='PGRST202' || /cancel_my_order/.test(r.error.message||'');
+  if(!missing) return r.error.message;
+  // Order first, so a refused delete loses nothing. If the items' foreign key
+  // blocks it, clear the items and try once more.
+  const delOrder=()=>sb.from('orders').delete().eq('id',orderId).select('id');
+  let {data,error}=await delOrder();
+  if(error && /foreign key/i.test(error.message||'')){
+    await sb.from('order_items').delete().eq('order_id',orderId);
+    ({data,error}=await delOrder());
+  }
+  if(error) return error.message;
+  if(!data || !data.length) return 'The order could not be cancelled: the database did not allow it. Please ask the admin.';
+  return null;
 }
 
 // Compress an image client-side before upload: downscale to a max dimension

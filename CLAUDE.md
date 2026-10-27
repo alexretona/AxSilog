@@ -111,6 +111,13 @@ Supabase client strips the hash once it parses it) and routes the user to
 which sets `role='organizer', status='pending'`; an admin approves them from the
 Admin tab. Tabs are gated on this pair in `buildTabs()` (`index.html:517`).
 
+### Cancelling orders
+
+Go through `removeMyOrder()`, never bare deletes: it calls the `cancel_my_order`
+RPC (`supabase/2026-10-27-cancel-order.sql`; own order, still `new`, not
+delivered). Its fallback deletes with `.select()` and treats zero rows as a
+failure, because a delete RLS refuses returns **no error and no rows**.
+
 ### Order lifecycle
 
 `new` → `confirmed` (organizer accepts, after proof upload) → delivered
